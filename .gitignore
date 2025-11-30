@@ -1,0 +1,22 @@
+# バイナリファイルを無視
+*.env
+*.ini
+
+*.sock
+*.exe
+*.dll
+*.json
+!pico_capabilities.json
+*.Identifier
+# ログファイルを無視
+
+*.zip
+*.pptx
+
+
+# 仮想環境ディレクトリを無視
+venv/
+.venv/__pycache__/
+*.pyc
+secrets.env
+secrets.env
