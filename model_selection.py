@@ -167,11 +167,12 @@ def _normalise_base_url(provider: str, base_url: str | None, meta: Dict[str, str
         if not cleaned:
             return default_base
         lowered = cleaned.lower()
+        # Drop stale base URLs that point to non-OpenAI hosts, even though they may contain
+        # an `/openai` path segment (e.g. Gemini's compatibility endpoint).
+        if any(key in lowered for key in ("groq", "generativelanguage.googleapis.com")):
+            return default_base
         if any(key in lowered for key in ("openai", ".azure.com", "localhost", "127.0.0.1")):
             return cleaned.rstrip("/")
-        if any(key in lowered for key in ("groq", "generativelanguage.googleapis.com")):
-            # Drop stale base URLs pointing to other providers to avoid auth mismatch
-            return default_base
         return cleaned.rstrip("/")
 
     # Claude and other providers keep the explicit override or default as-is

@@ -28,3 +28,6 @@
 ## Security & Configuration Tips
 - Do not commit real API keys or personal data; keep secrets in environment variables or a local `secrets.env` that stays untracked. Rotate any leaked keys immediately.
 - The bundled SQLite database is for local use; avoid checking in new populated copies, and clear it before sharing if it contains user data.
+
+## Critical Instruction / 重要指示
+どれだけ時間とコストをかけてもよいので、確実に目標が達成されるようにしてほしい。

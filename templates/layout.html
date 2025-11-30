@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ルーチン・スケジューラー</title>
+    {% set base_href = (request.script_root or '') + '/' %}
+    <base href="{{ base_href }}">
+    <meta name="proxy-prefix" content="{{ request.script_root or '' }}">
     <link rel="icon" href="{{ url_for('static', filename='Scheduler-Agent.ico') }}" type="image/x-icon">
     <link rel="icon" href="{{ url_for('static', filename='Scheduler-Agent.png') }}" type="image/png">
     <link rel="preconnect" href="https://fonts.googleapis.com">

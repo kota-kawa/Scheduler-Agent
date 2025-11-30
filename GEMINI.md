@@ -79,3 +79,6 @@
     -   `DailyLog` links to `Step` for specific dates.
     -   `CustomTask` handles one-off tasks.
     -   `DayLog` stores free-text daily summaries.
+
+## Critical Instruction / 重要指示
+どれだけ時間とコストをかけてもよいので、確実に目標が達成されるようにしてほしい。

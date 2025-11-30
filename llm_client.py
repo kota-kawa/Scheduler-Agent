@@ -219,16 +219,27 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "あなたはユーザーのルーチンやカスタムタスク、および日報（Daily Log）を管理するアシスタントです。"
         "提供された context には直近の日報内容（recent_day_logs）も含まれています。"
         "ユーザーが日報の内容について質問した場合は、その情報を参照して回答してください。"
+        "また、get_day_log アクションを使用して任意の日付の日報を取得することも可能です。"
         "必ず次の JSON オブジェクトだけを返してください（コードフェンス禁止）:\n"
         '{"reply":"日本語の返答","actions":[{"type":"create_custom_task","date":"YYYY-MM-DD","name":"タスク名","time":"HH:MM","memo":"任意メモ"},'
         '{"type":"delete_custom_task","task_id":123},'
         '{"type":"toggle_step","date":"YYYY-MM-DD","step_id":123,"done":true,"memo":"任意メモ"},'
         '{"type":"toggle_custom_task","task_id":55,"done":true,"memo":"任意メモ"},'
+        '{"type":"update_custom_task_time","task_id":55,"new_time":"HH:MM"},'
+        '{"type":"rename_custom_task","task_id":55,"new_name":"新しいタスク名"},'
+        '{"type":"update_custom_task_memo","task_id":55,"new_memo":"新しいメモ"},'
         '{"type":"update_log","date":"YYYY-MM-DD","content":"日報テキスト"},'
+        '{"type":"get_day_log","date":"YYYY-MM-DD"},'
         '{"type":"add_routine","name":"ルーチン名","days":"0,1,2,3,4,5,6","description":"説明"},'
         '{"type":"delete_routine","routine_id":123},'
+        '{"type":"update_routine_days","routine_id":123,"new_days":"0,1,2,3,4"}'
         '{"type":"add_step","routine_id":123,"name":"ステップ名","time":"HH:MM","category":"Category"},'
-        '{"type":"delete_step","step_id":123}]}\n'
+        '{"type":"delete_step","step_id":123},'
+        '{"type":"update_step_time","step_id":123,"new_time":"HH:MM"},'
+        '{"type":"rename_step","step_id":123,"new_name":"新しいステップ名"},'
+        '{"type":"update_step_memo","step_id":123,"new_memo":"新しいメモ"},'
+        '{"type":"list_tasks_in_period","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"},'
+        '{"type":"get_daily_summary","date":"YYYY-MM-DD"}]}\n'
         "actions は null か空配列でも構いません。date が無い場合は today_date を使ってください。"
         "context にある ID 以外は使わないでください。reply は日本語の文章のみで JSON を含めないでください。"
     )

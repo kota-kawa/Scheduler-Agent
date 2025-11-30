@@ -1,6 +1,7 @@
 import datetime
 import calendar
 import os
+from typing import Any, Dict, List
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
@@ -9,15 +10,22 @@ from dotenv import load_dotenv
 
 load_dotenv("secrets.env")
 
-from llm_client import call_scheduler_llm
+from llm_client import UnifiedClient, call_scheduler_llm, _extract_json_object
 from model_selection import apply_model_selection, current_available_models, update_override
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['SECRET_KEY'] = 'devkey'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///scheduler.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+@app.context_processor
+def _inject_proxy_prefix():
+    return {"proxy_prefix": request.environ.get("SCRIPT_NAME", "") or ""}
 
 # Models
 
@@ -34,6 +42,7 @@ class Step(db.Model):
     name = db.Column(db.String(100), nullable=False)
     time = db.Column(db.String(10), default="00:00") # HH:MM
     category = db.Column(db.String(50), default="Other") # IoT, Browser, Lifestyle, Other
+    memo = db.Column(db.String(200)) # New field
 
 class DailyLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -195,6 +204,95 @@ def _build_scheduler_context(today=None):
     ]
     return "\n".join(context_parts)
 
+
+def _format_history_for_prompt(history_messages: List[Dict[str, str]]) -> str:
+    """Render conversation history into a compact prompt-friendly text."""
+
+    lines = []
+    for entry in history_messages:
+        role = entry.get("role")
+        content = entry.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            continue
+        lines.append(f"{role}: {content.strip()}")
+    return "\n".join(lines) or "会話ログは空でした。"
+
+
+def _normalise_history_messages(raw_history: Any) -> List[Dict[str, str]]:
+    """Coerce incoming history payloads into a safe list of role/content pairs."""
+
+    messages: List[Dict[str, str]] = []
+    if not isinstance(raw_history, list):
+        return messages
+
+    for entry in raw_history:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get("role") or "").strip().lower()
+        content = entry.get("content")
+        if role not in {"user", "assistant", "system"}:
+            continue
+        if not isinstance(content, str):
+            continue
+        messages.append({"role": role, "content": content})
+    return messages
+
+
+def _call_conversation_review(messages: List[Dict[str, str]], context: str) -> Dict[str, Any]:
+    """Ask the scheduler LLM to review recent conversation turns and suggest actions."""
+
+    client = UnifiedClient()
+    provider, model_name, _, _ = apply_model_selection("scheduler")
+    now_text = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    history_text = _format_history_for_prompt(messages)
+
+    system_prompt = (
+        f"現在時刻: {now_text}\n"
+        "あなたはスケジューラーの監査担当です。以下の会話ログを読み、予定やタスク、日報に対して自動アクションが必要かを判断してください。\n"
+        "必ず次の JSON オブジェクトのみを返してください（コードフェンスは禁止）。\n"
+        '{"action_required": true/false, "should_reply": true/false, "reply": "ユーザー向けメッセージ", '
+        '"actions": [{"type": "..."}], "notes": "任意の補足"}\n'
+        "actions は通常の Scheduler エージェントのスキーマ（create_custom_task/toggle_step/update_log など）に従ってください。"
+        "日付が省略された場合は context に含まれる today_date を使ってください。"
+    )
+
+    prompt_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": context},
+        {"role": "user", "content": f"会話ログ:\n{history_text}\n必要があれば actions を提案・実行してください。"},
+    ]
+
+    extra_args: Dict[str, Any] = {}
+    if provider in {"openai", "groq", "gemini"}:
+        extra_args["response_format"] = {"type": "json_object"}
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=prompt_messages,
+        temperature=0.2,
+        max_tokens=800,
+        **extra_args,
+    )
+
+    choice = response.choices[0] if response and getattr(response, "choices", None) else None
+    message = choice.message if choice else None
+    content = getattr(message, "content", "") if message else ""
+    parsed_obj, raw_text = _extract_json_object(content)
+    if not isinstance(parsed_obj, dict):
+        parsed_obj = {}
+
+    reply = parsed_obj.get("reply") if isinstance(parsed_obj.get("reply"), str) else ""
+    if not reply and isinstance(raw_text, str):
+        reply = raw_text
+
+    return {
+        "action_required": bool(parsed_obj.get("action_required")),
+        "should_reply": bool(parsed_obj.get("should_reply")),
+        "reply": reply.strip(),
+        "actions": parsed_obj.get("actions") if isinstance(parsed_obj.get("actions"), list) else [],
+        "notes": parsed_obj.get("notes") if isinstance(parsed_obj.get("notes"), str) else "",
+    }
+
 def _apply_actions(actions, default_date):
     results = []
     errors = []
@@ -292,6 +390,70 @@ def _apply_actions(actions, default_date):
                 dirty = True
                 continue
 
+            if action_type == "update_custom_task_time":
+                task_id = action.get("task_id")
+                new_time = action.get("new_time")
+                if not new_time:
+                    errors.append("update_custom_task_time: new_time が指定されていません。")
+                    continue
+                try:
+                    task_id_int = int(task_id)
+                except (TypeError, ValueError):
+                    errors.append("update_custom_task_time: task_id が不正です。")
+                    continue
+                task_obj = CustomTask.query.get(task_id_int)
+                if not task_obj:
+                    errors.append(f"task_id={task_id_int} が見つかりませんでした。")
+                    continue
+                task_obj.time = new_time.strip()
+                results.append(f"カスタムタスク「{task_obj.name}」の時刻を {task_obj.time} に更新しました。")
+                modified_ids.append(f"item_custom_{task_obj.id}")
+                dirty = True
+                continue
+
+            if action_type == "rename_custom_task":
+                task_id = action.get("task_id")
+                new_name = action.get("new_name")
+                if not new_name:
+                    errors.append("rename_custom_task: new_name が指定されていません。")
+                    continue
+                try:
+                    task_id_int = int(task_id)
+                except (TypeError, ValueError):
+                    errors.append("rename_custom_task: task_id が不正です。")
+                    continue
+                task_obj = CustomTask.query.get(task_id_int)
+                if not task_obj:
+                    errors.append(f"task_id={task_id_int} が見つかりませんでした。")
+                    continue
+                old_name = task_obj.name
+                task_obj.name = new_name.strip()
+                results.append(f"カスタムタスク「{old_name}」の名前を「{task_obj.name}」に更新しました。")
+                modified_ids.append(f"item_custom_{task_obj.id}")
+                dirty = True
+                continue
+
+            if action_type == "update_custom_task_memo":
+                task_id = action.get("task_id")
+                new_memo = action.get("new_memo")
+                if new_memo is None: # Allow empty memo to clear it
+                    errors.append("update_custom_task_memo: new_memo が指定されていません。")
+                    continue
+                try:
+                    task_id_int = int(task_id)
+                except (TypeError, ValueError):
+                    errors.append("update_custom_task_memo: task_id が不正です。")
+                    continue
+                task_obj = CustomTask.query.get(task_id_int)
+                if not task_obj:
+                    errors.append(f"task_id={task_id_int} が見つかりませんでした。")
+                    continue
+                task_obj.memo = new_memo.strip()
+                results.append(f"カスタムタスク「{task_obj.name}」のメモを更新しました。")
+                modified_ids.append(f"item_custom_{task_obj.id}")
+                dirty = True
+                continue
+
             if action_type == "update_log":
                 content = action.get("content")
                 if not isinstance(content, str) or not content.strip():
@@ -306,6 +468,16 @@ def _apply_actions(actions, default_date):
                 results.append(f"{date_value} の日報を更新しました。")
                 modified_ids.append("daily-log-card")
                 dirty = True
+                continue
+
+            if action_type == "get_day_log":
+                date_value = _parse_date(action.get("date"), default_date)
+                day_log = DayLog.query.filter_by(date=date_value).first()
+                if day_log and day_log.content:
+                    results.append(f"{date_value} の日報:\n{day_log.content}")
+                else:
+                    results.append(f"{date_value} の日報は見つかりませんでした。")
+                # This action only reads, so no changes are committed, and no dirty flag needed
                 continue
             
             # Routine/Step Management
@@ -333,6 +505,26 @@ def _apply_actions(actions, default_date):
                     errors.append("delete_routine: not found")
                 continue
 
+            if action_type == "update_routine_days":
+                routine_id = action.get("routine_id")
+                new_days = action.get("new_days")
+                if not new_days:
+                    errors.append("update_routine_days: new_days が指定されていません。")
+                    continue
+                try:
+                    routine_id_int = int(routine_id)
+                except (TypeError, ValueError):
+                    errors.append("update_routine_days: routine_id が不正です。")
+                    continue
+                routine_obj = Routine.query.get(routine_id_int)
+                if not routine_obj:
+                    errors.append(f"routine_id={routine_id_int} が見つかりませんでした。")
+                    continue
+                routine_obj.days = new_days.strip()
+                results.append(f"ルーチン「{routine_obj.name}」の曜日を {routine_obj.days} に更新しました。")
+                dirty = True
+                continue
+
             if action_type == "add_step":
                 rid = action.get("routine_id")
                 name = action.get("name")
@@ -358,8 +550,147 @@ def _apply_actions(actions, default_date):
                     errors.append("delete_step: not found")
                 continue
 
-            errors.append(f"未知のアクション: {action_type}")
+            if action_type == "update_step_time":
+                step_id = action.get("step_id")
+                new_time = action.get("new_time")
+                if not new_time:
+                    errors.append("update_step_time: new_time が指定されていません。")
+                    continue
+                try:
+                    step_id_int = int(step_id)
+                except (TypeError, ValueError):
+                    errors.append("update_step_time: step_id が不正です。")
+                    continue
+                step_obj = Step.query.get(step_id_int)
+                if not step_obj:
+                    errors.append(f"step_id={step_id_int} が見つかりませんでした。")
+                    continue
+                step_obj.time = new_time.strip()
+                results.append(f"ステップ「{step_obj.name}」の時刻を {step_obj.time} に更新しました。")
+                modified_ids.append(f"item_routine_{step_obj.id}")
+                dirty = True
+                continue
+            
+            if action_type == "rename_step":
+                step_id = action.get("step_id")
+                new_name = action.get("new_name")
+                if not new_name:
+                    errors.append("rename_step: new_name が指定されていません。")
+                    continue
+                try:
+                    step_id_int = int(step_id)
+                except (TypeError, ValueError):
+                    errors.append("rename_step: step_id が不正です。")
+                    continue
+                step_obj = Step.query.get(step_id_int)
+                if not step_obj:
+                    errors.append(f"step_id={step_id_int} が見つかりませんでした。")
+                    continue
+                old_name = step_obj.name
+                step_obj.name = new_name.strip()
+                results.append(f"ステップ「{old_name}」の名前を「{step_obj.name}」に更新しました。")
+                modified_ids.append(f"item_routine_{step_obj.id}")
+                dirty = True
+                continue
+            
+            if action_type == "update_step_memo":
+                step_id = action.get("step_id")
+                new_memo = action.get("new_memo")
+                if new_memo is None: # Allow empty memo to clear it
+                    errors.append("update_step_memo: new_memo が指定されていません。")
+                    continue
+                try:
+                    step_id_int = int(step_id)
+                except (TypeError, ValueError):
+                    errors.append("update_step_memo: step_id が不正です。")
+                    continue
+                step_obj = Step.query.get(step_id_int)
+                if not step_obj:
+                    errors.append(f"step_id={step_id_int} が見つかりませんでした。")
+                    continue
+                # For now, assuming step_obj has a memo field.
+                # If memo is specific to a DailyLog, this logic needs adjustment.
+                step_obj.memo = new_memo.strip() 
+                results.append(f"ステップ「{step_obj.name}」のメモを更新しました。")
+                modified_ids.append(f"item_routine_{step_obj.id}")
+                dirty = True
+                continue
 
+            if action_type == "list_tasks_in_period":
+                start_date = _parse_date(action.get("start_date"), default_date)
+                end_date = _parse_date(action.get("end_date"), default_date)
+
+                if start_date > end_date:
+                    errors.append("list_tasks_in_period: 開始日が終了日より後です。")
+                    continue
+                
+                tasks_info = []
+                
+                # Custom Tasks
+                custom_tasks = CustomTask.query.filter(CustomTask.date.between(start_date, end_date)).order_by(CustomTask.date, CustomTask.time).all()
+                for ct in custom_tasks:
+                    tasks_info.append(f"カスタムタスク [{ct.id}]: {ct.date.isoformat()} {ct.time} - {ct.name} (完了: {ct.done}) (メモ: {ct.memo if ct.memo else 'なし'})")
+
+                # Routine Steps (more complex as they are recurring)
+                # This would require iterating through each day in the period and checking routines
+                current_date = start_date
+                while current_date <= end_date:
+                    routines_for_day = get_weekday_routines(current_date.weekday())
+                    for r in routines_for_day:
+                        for s in r.steps:
+                            log = DailyLog.query.filter_by(date=current_date, step_id=s.id).first()
+                            status = "完了" if log and log.done else "未完了"
+                            memo = log.memo if log and log.memo else (s.memo if s.memo else 'なし')
+                            tasks_info.append(f"ルーチンステップ [{s.id}]: {current_date.isoformat()} {s.time} - {r.name} - {s.name} (完了: {status}) (メモ: {memo})")
+                    current_date += datetime.timedelta(days=1)
+                
+                if tasks_info:
+                    results.append(f"{start_date.isoformat()} から {end_date.isoformat()} までのタスク:\n" + "\n".join(tasks_info))
+                else:
+                    results.append(f"{start_date.isoformat()} から {end_date.isoformat()} までのタスクは見つかりませんでした。")
+                
+                # This action only reads, so no changes are committed, and no dirty flag needed
+                continue
+            
+            if action_type == "get_daily_summary":
+                target_date = _parse_date(action.get("date"), default_date)
+                
+                summary_parts = []
+
+                # DayLog content
+                day_log = DayLog.query.filter_by(date=target_date).first()
+                if day_log and day_log.content:
+                    summary_parts.append(f"日報: {day_log.content}")
+                else:
+                    summary_parts.append("日報: なし")
+
+                # Custom Tasks
+                custom_tasks = CustomTask.query.filter_by(date=target_date).all()
+                if custom_tasks:
+                    summary_parts.append("カスタムタスク:")
+                    for ct in custom_tasks:
+                        status = "完了" if ct.done else "未完了"
+                        summary_parts.append(f"- {ct.time} {ct.name} ({status}) (メモ: {ct.memo if ct.memo else 'なし'})")
+                else:
+                    summary_parts.append("カスタムタスク: なし")
+
+                # Routine Steps
+                routines_for_day = get_weekday_routines(target_date.weekday())
+                if routines_for_day:
+                    summary_parts.append("ルーチンステップ:")
+                    for r in routines_for_day:
+                        for s in r.steps:
+                            log = DailyLog.query.filter_by(date=target_date, step_id=s.id).first()
+                            status = "完了" if log and log.done else "未完了"
+                            memo = log.memo if log and log.memo else (s.memo if s.memo else 'なし')
+                            summary_parts.append(f"- {s.time} {r.name} - {s.name} ({status}) (メモ: {memo})")
+                else:
+                    summary_parts.append("ルーチンステップ: なし")
+                
+                results.append(f"{target_date.isoformat()} の活動概要:\n" + "\n".join(summary_parts))
+                continue
+
+            errors.append(f"未知のアクション: {action_type}")
         if dirty:
             db.session.commit()
     except Exception as exc:  # noqa: BLE001
@@ -368,6 +699,60 @@ def _apply_actions(actions, default_date):
         results = []
 
     return results, errors, modified_ids
+
+@app.route('/api/calendar')
+def api_calendar():
+    today = datetime.date.today()
+    year = request.args.get('year', today.year, type=int)
+    month = request.args.get('month', today.month, type=int)
+
+    if month > 12:
+        month = 1
+        year += 1
+    elif month < 1:
+        month = 12
+        year -= 1
+
+    cal = calendar.Calendar(firstweekday=0)
+    month_days = cal.monthdatescalendar(year, month)
+
+    calendar_data = []
+    for week in month_days:
+        week_data = []
+        for day in week:
+            is_current_month = (day.month == month)
+
+            weekday = day.weekday()
+            routines = get_weekday_routines(weekday)
+            total_steps = sum(len(r.steps) for r in routines)
+
+            logs = DailyLog.query.filter_by(date=day).all()
+            completed_count = sum(1 for l in logs if l.done)
+
+            custom_tasks = CustomTask.query.filter_by(date=day).all()
+            total_steps += len(custom_tasks)
+            completed_count += sum(1 for t in custom_tasks if t.done)
+
+            day_log = DayLog.query.filter_by(date=day).first()
+            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
+
+            week_data.append({
+                'date': day.isoformat(), # Convert date to ISO string
+                'day_num': day.day,
+                'is_current_month': is_current_month,
+                'total_routines': len(routines) + len(custom_tasks),
+                'total_steps': total_steps,
+                'completed_steps': completed_count,
+                'has_day_log': has_day_log
+            })
+        calendar_data.append(week_data)
+
+    return jsonify({
+        'calendar_data': calendar_data,
+        'year': year,
+        'month': month,
+        'today': today.isoformat()
+    })
 
 @app.route('/')
 def index():
@@ -550,6 +935,39 @@ def embed_calendar():
     )
 
 
+@app.route('/api/day/<date_str>')
+def api_day_view(date_str):
+    try:
+        date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
+
+    timeline_items, completion_rate = _get_timeline_data(date_obj)
+    day_log = DayLog.query.filter_by(date=date_obj).first()
+
+    # Convert complex objects to JSON-serializable dictionaries
+    serialized_timeline_items = []
+    for item in timeline_items:
+        serialized_item = {
+            'type': item['type'],
+            'time': item['time'],
+            'id': item['id'],
+            'routine_name': item['routine']['name'],
+            'step_name': item['step']['name'],
+            'step_category': item['step'].get('category'),
+            'log_done': item['log'].done if item['log'] else False,
+            'log_memo': item['log'].memo if item['log'] else None,
+            'is_done': item['real_obj'].done if item.get('real_obj') else (item['log'].done if item['log'] else False) # For custom tasks, use 'done' directly
+        }
+        serialized_timeline_items.append(serialized_item)
+
+    return jsonify({
+        'date': date_obj.isoformat(),
+        'timeline_items': serialized_timeline_items,
+        'completion_rate': completion_rate,
+        'day_log_content': day_log.content if day_log else None
+    })
+
 @app.route('/day/<date_str>', methods=['GET', 'POST'])
 def day_view(date_str):
     try:
@@ -651,6 +1069,28 @@ def day_view_log_partial(date_str):
     return render_template('log_partial.html', day_log=day_log)
 
 
+@app.route('/api/routines')
+def api_routines():
+    routines = Routine.query.all()
+    serialized_routines = []
+    for r in routines:
+        steps = []
+        for s in r.steps:
+            steps.append({
+                'id': s.id,
+                'name': s.name,
+                'time': s.time,
+                'category': s.category
+            })
+        serialized_routines.append({
+            'id': r.id,
+            'name': r.name,
+            'days': r.days,
+            'description': r.description,
+            'steps': steps
+        })
+    return jsonify({'routines': serialized_routines})
+
 @app.route('/routines')
 def routines_list():
     routines = Routine.query.all()
@@ -737,6 +1177,55 @@ def manage_chat_history():
             for h in history
         ]
     })
+
+
+@app.post("/api/conversations/review")
+def review_conversation_history():
+    payload = request.get_json(silent=True) or {}
+    raw_history = payload.get("history")
+    if raw_history is None:
+        raw_history = payload.get("messages")
+
+    history_messages = _normalise_history_messages(raw_history)
+    if not history_messages:
+        return jsonify({"error": "history must be a non-empty array"}), 400
+
+    today = datetime.date.today()
+    context = _build_scheduler_context(today)
+
+    try:
+        review = _call_conversation_review(history_messages, context)
+    except Exception as exc:
+        return jsonify({"error": f"会話履歴の分析に失敗しました: {exc}"}), 500
+
+    actions = review.get("actions") if isinstance(review.get("actions"), list) else []
+    results, errors, modified_ids = _apply_actions(actions, today)
+    action_taken = bool(results)
+
+    reply_parts = []
+    base_reply = review.get("reply") if isinstance(review.get("reply"), str) else ""
+    if base_reply:
+        reply_parts.append(base_reply)
+    if results:
+        reply_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
+    if errors:
+        reply_parts.append("処理で問題が発生しました:\n" + "\n".join(f"- {err}" for err in errors))
+
+    final_reply = "\n\n".join(part for part in reply_parts if part).strip()
+
+    return jsonify(
+        {
+            "action_required": bool(review.get("action_required") or actions),
+            "action_taken": action_taken,
+            "actions": actions,
+            "results": results,
+            "errors": errors,
+            "modified_ids": modified_ids,
+            "should_reply": bool(review.get("should_reply") or final_reply),
+            "reply": final_reply,
+            "notes": review.get("notes") if isinstance(review.get("notes"), str) else "",
+        }
+    )
 
 @app.post("/api/chat")
 def chat():

@@ -12,6 +12,27 @@ const escapeHtml = (s) =>
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]
   ));
 
+const proxyPrefixMeta = document.querySelector("meta[name='proxy-prefix']");
+const proxyPrefixRaw = (proxyPrefixMeta?.content || "").trim();
+const proxyPrefix = proxyPrefixRaw === "/" ? "" : proxyPrefixRaw.replace(/\/+$/, "");
+
+function withPrefix(path = "/") {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (!proxyPrefix) return normalized;
+  const cleaned = proxyPrefix.startsWith("/") ? proxyPrefix : `/${proxyPrefix}`;
+  return `${cleaned}${normalized}`.replace(/\/{2,}/g, "/");
+}
+
+function stripPrefixFromPath(path) {
+  if (!proxyPrefix) return path || "/";
+  const cleaned = proxyPrefix.startsWith("/") ? proxyPrefix : `/${proxyPrefix}`;
+  if (path && path.startsWith(cleaned)) {
+    const stripped = path.slice(cleaned.length);
+    return stripped.startsWith("/") ? stripped : `/${stripped || ""}`;
+  }
+  return path || "/";
+}
+
 /** ---------- モデル選択 ---------- */
 const DEFAULT_MODEL = { provider: "openai", model: "gpt-4.1", base_url: "" };
 let availableModels = [];
@@ -42,7 +63,7 @@ async function loadModelOptions(){
   if(!modelSelectEl) return;
 
   try{
-    const res = await fetch("/api/models", { cache: "no-store" });
+    const res = await fetch(withPrefix("/api/models"), { cache: "no-store" });
     if(!res.ok){
       throw new Error(`HTTP ${res.status}`);
     }
@@ -79,7 +100,7 @@ async function handleModelChange(){
   currentModel = { provider, model, base_url: baseUrl };
 
   try{
-    const res = await fetch("/model_settings", {
+    const res = await fetch(withPrefix("/model_settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(currentModel),
@@ -139,7 +160,7 @@ function pushMessage(role, text, timestamp = null) {
 
 async function loadChatHistory() {
   try {
-    const res = await fetch("/api/chat/history");
+    const res = await fetch(withPrefix("/api/chat/history"));
     if (!res.ok) return; // If failed, just start fresh
     const data = await res.json();
     
@@ -175,7 +196,7 @@ async function requestAssistantResponse(){
     messages: chatHistory.map(({ role, content }) => ({ role, content })),
   };
 
-  const res = await fetch("/api/chat", {
+  const res = await fetch(withPrefix("/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -190,7 +211,8 @@ async function requestAssistantResponse(){
 }
 
 async function refreshView(modifiedIds) {
-  const path = window.location.pathname;
+  const rawPath = window.location.pathname || "/";
+  const path = stripPrefixFromPath(rawPath);
   const search = window.location.search;
   const timestamp = Date.now();
   
@@ -215,7 +237,7 @@ async function refreshView(modifiedIds) {
       try {
           // construct url with existing query params + timestamp
           const separator = search ? '&' : '?';
-          const url = `/calendar_partial${search}${separator}t=${timestamp}`;
+          const url = withPrefix(`/calendar_partial${search}${separator}t=${timestamp}`);
           
           const res = await fetch(url);
           if (res.ok) {
@@ -238,7 +260,7 @@ async function refreshView(modifiedIds) {
   if (path.startsWith('/day/')) {
       // Refresh Timeline
       try {
-          const res = await fetch(`${path}/timeline?t=${timestamp}`);
+          const res = await fetch(`${withPrefix(path)}/timeline?t=${timestamp}`);
           if (res.ok) {
               const html = await res.text();
               const container = document.getElementById('schedule-container');
@@ -255,7 +277,7 @@ async function refreshView(modifiedIds) {
 
       // Refresh Daily Log
       try {
-          const res = await fetch(`${path}/log_partial?t=${timestamp}`);
+          const res = await fetch(`${withPrefix(path)}/log_partial?t=${timestamp}`);
           if (res.ok) {
               const html = await res.text();
               const wrapper = document.getElementById('daily-log-wrapper');
@@ -317,7 +339,7 @@ if(chatResetBtn){
     if(!confirm("チャット履歴を削除しますか？")) return;
     
     try {
-      await fetch("/api/chat/history", { method: "DELETE" });
+      await fetch(withPrefix("/api/chat/history"), { method: "DELETE" });
     } catch (e) {
       console.error("Failed to clear history", e);
     }
