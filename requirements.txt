@@ -1,0 +1,6 @@
+Flask
+Flask-SQLAlchemy
+python-dateutil
+python-dotenv
+openai>=1.56.0
+anthropic>=0.75.0

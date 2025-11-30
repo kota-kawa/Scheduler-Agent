@@ -1,0 +1,11 @@
+services:
+  web:
+    build: .
+    init: true
+    ports:
+      - "5010:5010"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_DEBUG=1
