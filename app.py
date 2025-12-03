@@ -10,8 +10,17 @@ from dotenv import load_dotenv
 
 load_dotenv("secrets.env")
 
-from llm_client import UnifiedClient, call_scheduler_llm, _extract_json_object
+from llm_client import (
+    UnifiedClient,
+    _claude_messages_from_openai,
+    _content_to_text,
+    _extract_actions_from_claude_blocks,
+    _extract_actions_from_tool_calls,
+    _merge_dict,
+    call_scheduler_llm,
+)
 from model_selection import apply_model_selection, current_available_models, update_override
+from scheduler_tools import REVIEW_TOOLS
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -242,55 +251,80 @@ def _call_conversation_review(messages: List[Dict[str, str]], context: str) -> D
     """Ask the scheduler LLM to review recent conversation turns and suggest actions."""
 
     client = UnifiedClient()
-    provider, model_name, _, _ = apply_model_selection("scheduler")
-    now_text = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    provider = client.provider
+    model_name = client.model_name
+    now = datetime.datetime.now().astimezone()
+    now_text = now.strftime("%Y-%m-%d %H:%M:%S %Z")
+    now_iso = now.isoformat(timespec="seconds")
     history_text = _format_history_for_prompt(messages)
 
     system_prompt = (
-        f"現在時刻: {now_text}\n"
-        "あなたはスケジューラーの監査担当です。以下の会話ログを読み、予定やタスク、日報に対して自動アクションが必要かを判断してください。\n"
-        "必ず次の JSON オブジェクトのみを返してください（コードフェンスは禁止）。\n"
-        '{"action_required": true/false, "should_reply": true/false, "reply": "ユーザー向けメッセージ", '
-        '"actions": [{"type": "..."}], "notes": "任意の補足"}\n'
-        "actions は通常の Scheduler エージェントのスキーマ（create_custom_task/toggle_step/update_log など）に従ってください。"
-        "日付が省略された場合は context に含まれる today_date を使ってください。"
+        f"現在日時: {now_text} / {now_iso}\n"
+        "あなたはスケジューラーの監査担当です。会話ログを読み、必要に応じて予定・タスク・日報を更新します。"
+        "返信が必要な場合は日本語で短くまとめ、必ずツール呼び出しでアクションを提示してください。"
+        "日付が省略された場合は context に含まれる today_date を利用してください。\n"
+        "会話ログから、今日の活動記録、達成したこと、気付いたことなど、日報に残すべき重要な情報があれば、"
+        "`append_day_log` ツールを使って積極的に記録してください。"
     )
 
     prompt_messages = [
         {"role": "system", "content": system_prompt},
         {"role": "system", "content": context},
-        {"role": "user", "content": f"会話ログ:\n{history_text}\n必要があれば actions を提案・実行してください。"},
+        {"role": "user", "content": f"会話ログ:\n{history_text}\n必要があればツールを使って自動対応してください。"},
     ]
 
-    extra_args: Dict[str, Any] = {}
-    if provider in {"openai", "groq", "gemini"}:
-        extra_args["response_format"] = {"type": "json_object"}
+    reply_text = ""
+    actions: List[Dict[str, Any]] = []
+    decision: Dict[str, Any] = {}
 
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=prompt_messages,
-        temperature=0.2,
-        max_tokens=800,
-        **extra_args,
+    if provider == "claude":
+        system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
+        response = client.client.messages.create(
+            model=model_name,
+            system=system_text,
+            messages=claude_messages,
+            temperature=0.2,
+            max_tokens=800,
+            tools=REVIEW_TOOLS,
+            tool_choice={"type": "auto"},
+        )
+        reply_text, actions, decision = _extract_actions_from_claude_blocks(getattr(response, "content", None))
+    else:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=prompt_messages,
+            temperature=0.2,
+            max_tokens=800,
+            tools=REVIEW_TOOLS,
+            tool_choice="auto",
+        )
+
+        message = response.choices[0].message if response and getattr(response, "choices", None) else None
+        reply_text = _content_to_text(getattr(message, "content", "")) if message else ""
+        actions, decision = _extract_actions_from_tool_calls(getattr(message, "tool_calls", [])) if message else ([], None)
+        decision = decision or {}
+
+    resolved = _merge_dict(
+        {
+            "action_required": bool(actions),
+            "should_reply": bool(reply_text),
+            "reply": reply_text.strip(),
+            "notes": "",
+        },
+        decision,
     )
 
-    choice = response.choices[0] if response and getattr(response, "choices", None) else None
-    message = choice.message if choice else None
-    content = getattr(message, "content", "") if message else ""
-    parsed_obj, raw_text = _extract_json_object(content)
-    if not isinstance(parsed_obj, dict):
-        parsed_obj = {}
-
-    reply = parsed_obj.get("reply") if isinstance(parsed_obj.get("reply"), str) else ""
-    if not reply and isinstance(raw_text, str):
-        reply = raw_text
+    if resolved.get("reply"):
+        resolved["should_reply"] = True
+    if actions and not resolved.get("action_required"):
+        resolved["action_required"] = True
 
     return {
-        "action_required": bool(parsed_obj.get("action_required")),
-        "should_reply": bool(parsed_obj.get("should_reply")),
-        "reply": reply.strip(),
-        "actions": parsed_obj.get("actions") if isinstance(parsed_obj.get("actions"), list) else [],
-        "notes": parsed_obj.get("notes") if isinstance(parsed_obj.get("notes"), str) else "",
+        "action_required": bool(resolved.get("action_required")),
+        "should_reply": bool(resolved.get("should_reply")),
+        "reply": resolved.get("reply") or "",
+        "actions": actions,
+        "notes": resolved.get("notes") or "",
     }
 
 def _apply_actions(actions, default_date):
@@ -466,6 +500,30 @@ def _apply_actions(actions, default_date):
                     db.session.add(day_log)
                 day_log.content = content.strip()
                 results.append(f"{date_value} の日報を更新しました。")
+                modified_ids.append("daily-log-card")
+                dirty = True
+                continue
+
+            if action_type == "append_day_log":
+                content = action.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    errors.append("append_day_log: content が指定されていません。")
+                    continue
+                date_value = _parse_date(action.get("date"), default_date)
+                day_log = DayLog.query.filter_by(date=date_value).first()
+                if not day_log:
+                    day_log = DayLog(date=date_value)
+                    day_log.content = content.strip()
+                    db.session.add(day_log)
+                else:
+                    # Existing log found, append
+                    current_content = day_log.content or ""
+                    if current_content:
+                        day_log.content = current_content + "\n" + content.strip()
+                    else:
+                        day_log.content = content.strip()
+                
+                results.append(f"{date_value} の日報に追記しました。")
                 modified_ids.append("daily-log-card")
                 dirty = True
                 continue
@@ -1227,6 +1285,59 @@ def review_conversation_history():
         }
     )
 
+def process_chat_request(user_message: str, save_history: bool = True) -> Dict[str, Any]:
+    """Process a natural language request using the scheduler agent's logic."""
+    
+    # Save user message (optional in this context, but good for consistency if we want to track it)
+    # For MCP usage, we might skip saving to ChatHistory table or save it with a special flag?
+    # Let's save it for now as it's valuable debugging info.
+    if save_history:
+        try:
+            db.session.add(ChatHistory(role="user", content=user_message))
+            db.session.commit()
+        except Exception as e:
+            print(f"Failed to save user message: {e}")
+
+    today = datetime.date.today()
+    context = _build_scheduler_context(today)
+
+    formatted_messages = [{"role": "user", "content": user_message}]
+
+    try:
+        reply_text, actions = call_scheduler_llm(formatted_messages, context)
+    except Exception as exc:
+        return {
+            "reply": f"LLM 呼び出しに失敗しました: {exc}",
+            "should_refresh": False,
+            "modified_ids": []
+        }
+
+    results, errors, modified_ids = _apply_actions(actions, today)
+
+    message_parts = []
+    if reply_text and reply_text.strip():
+        message_parts.append(reply_text.strip())
+    if results:
+        message_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
+    if errors:
+        message_parts.append("処理で問題が発生しました:\n" + "\n".join(f"- {err}" for err in errors))
+
+    final_reply = "\n\n".join(message_parts) if message_parts else "了解しました。"
+
+    # Save assistant reply
+    if save_history:
+        try:
+            db.session.add(ChatHistory(role="assistant", content=final_reply))
+            db.session.commit()
+        except Exception as e:
+            print(f"Failed to save assistant message: {e}")
+
+    return {
+        "reply": final_reply,
+        "should_refresh": (len(results) > 0),
+        "modified_ids": modified_ids
+    }
+
 @app.post("/api/chat")
 def chat():
     payload = request.get_json(silent=True) or {}
@@ -1247,47 +1358,11 @@ def chat():
     if not formatted_messages or formatted_messages[-1]["role"] != "user":
         return jsonify({"error": "last message must be from user"}), 400
 
-    # Save user message
     user_msg_content = formatted_messages[-1]["content"]
-    try:
-        db.session.add(ChatHistory(role="user", content=user_msg_content))
-        db.session.commit()
-    except Exception as e:
-        print(f"Failed to save user message: {e}")
-
-    today = datetime.date.today()
-    context = _build_scheduler_context(today)
-
-    try:
-        reply_text, actions = call_scheduler_llm(formatted_messages, context)
-    except Exception as exc:
-        return jsonify({"reply": f"LLM 呼び出しに失敗しました: {exc}"}), 200
-
-    results, errors, modified_ids = _apply_actions(actions, today)
-
-    message_parts = []
-    if reply_text and reply_text.strip():
-        message_parts.append(reply_text.strip())
-    if results:
-        message_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
-    if errors:
-        message_parts.append("処理で問題が発生しました:\n" + "\n".join(f"- {err}" for err in errors))
-
-    final_reply = "\n\n".join(message_parts) if message_parts else "了解しました。"
-
-    # Save assistant reply
-    try:
-        db.session.add(ChatHistory(role="assistant", content=final_reply))
-        db.session.commit()
-    except Exception as e:
-        print(f"Failed to save assistant message: {e}")
     
-    # Return JSON with extra fields
-    return jsonify({
-        "reply": final_reply,
-        "should_refresh": (len(results) > 0),
-        "modified_ids": modified_ids
-    })
+    result = process_chat_request(user_msg_content)
+    
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5010, debug=True)

@@ -13,6 +13,7 @@ except ImportError:
     Anthropic = None
 
 from model_selection import PROVIDER_DEFAULTS, apply_model_selection
+from scheduler_tools import REVIEW_DECISION_TOOL_NAME, REVIEW_TOOLS, SCHEDULER_TOOLS
 
 
 def _content_to_text(content: Any) -> str:
@@ -54,45 +55,119 @@ def _content_to_text(content: Any) -> str:
     return str(content).strip()
 
 
-def _extract_json_object(text: Any) -> Tuple[Any | None, str]:
-    """Extract the first JSON object from the LLM response text."""
-
-    if text is None:
-        return None, ""
-
-    if isinstance(text, dict):
-        return text, ""
-
-    if isinstance(text, list):
-        joined = "\n".join(_content_to_text(part) for part in text)
-        text = joined
-
-    stripped = str(text).strip()
-    if stripped.startswith("```json"):
-        stripped = stripped[7:]
-    if stripped.startswith("```"):
-        stripped = stripped[3:]
-    if stripped.endswith("```"):
-        stripped = stripped[:-3]
-    stripped = stripped.strip()
-
-    decoder = json.JSONDecoder()
-
+def _safe_json_loads(data: Any) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        return data
+    if not isinstance(data, str):
+        return {}
     try:
-        obj, _ = decoder.raw_decode(stripped)
-        return obj, stripped
-    except json.JSONDecodeError:
-        pass
+        parsed = json.loads(data)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
 
-    if "{" in stripped and "}" in stripped:
-        snippet = stripped[stripped.find("{") :]
-        try:
-            obj, _ = decoder.raw_decode(snippet)
-            return obj, stripped
-        except json.JSONDecodeError:
-            return None, stripped
 
-    return None, stripped
+def _merge_dict(a: Dict[str, Any] | None, b: Dict[str, Any] | None) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    if isinstance(a, dict):
+        merged.update(a)
+    if isinstance(b, dict):
+        merged.update(b)
+    return merged
+
+
+def _claude_messages_from_openai(messages: List[Dict[str, str]]) -> Tuple[str, List[Dict[str, Any]]]:
+    """Convert OpenAI-style messages into Anthropic format."""
+
+    system_parts: List[str] = []
+    converted: List[Dict[str, Any]] = []
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "system":
+            system_parts.append(str(content))
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+        converted.append(
+            {
+                "role": role,
+                "content": [{"type": "text", "text": str(content)}],
+            }
+        )
+
+    system_prompt = "\n".join(part for part in system_parts if part.strip())
+    return system_prompt, converted
+
+
+def _extract_actions_from_tool_calls(tool_calls: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+    """Convert OpenAI-style tool_calls into action payloads and optional review decision."""
+
+    actions: List[Dict[str, Any]] = []
+    decision: Dict[str, Any] | None = None
+
+    if not tool_calls:
+        return actions, decision
+
+    for call in tool_calls:
+        function = getattr(call, "function", None)
+        name = getattr(function, "name", None)
+        raw_args = getattr(function, "arguments", None)
+        args = _safe_json_loads(raw_args)
+
+        if name == REVIEW_DECISION_TOOL_NAME:
+            decision = {
+                "action_required": bool(args.get("action_required")),
+                "should_reply": bool(args.get("should_reply")),
+                "reply": args.get("reply") or "",
+                "notes": args.get("notes") or "",
+            }
+            continue
+
+        if not name:
+            continue
+
+        payload = {"type": name}
+        if isinstance(args, dict):
+            payload.update({k: v for k, v in args.items() if v is not None})
+        actions.append(payload)
+
+    return actions, decision
+
+
+def _extract_actions_from_claude_blocks(blocks: Any) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any] | None]:
+    """Parse Anthropic content blocks into reply text, actions, and optional review decision."""
+
+    reply_parts: List[str] = []
+    actions: List[Dict[str, Any]] = []
+    decision: Dict[str, Any] | None = None
+
+    if not isinstance(blocks, list):
+        return "", actions, decision
+
+    for block in blocks:
+        block_type = getattr(block, "type", None)
+        if block_type == "text":
+            reply_parts.append(getattr(block, "text", ""))
+        elif block_type == "tool_use":
+            name = getattr(block, "name", None)
+            args = getattr(block, "input", {}) if hasattr(block, "input") else {}
+            if name == REVIEW_DECISION_TOOL_NAME:
+                decision = {
+                    "action_required": bool(args.get("action_required")),
+                    "should_reply": bool(args.get("should_reply")),
+                    "reply": args.get("reply") or "",
+                    "notes": args.get("notes") or "",
+                }
+                continue
+            if not name or not isinstance(args, dict):
+                continue
+            payload = {"type": name}
+            payload.update({k: v for k, v in args.items() if v is not None})
+            actions.append(payload)
+
+    return "\n".join(part for part in reply_parts if part.strip()), actions, decision
 
 
 class UnifiedClient:
@@ -208,40 +283,19 @@ def _current_timestamp() -> str:
 
 
 def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Call the selected LLM with a structured prompt and return reply/actions."""
+    """Call the selected LLM with structured tool definitions and return reply/actions."""
 
     client = UnifiedClient()
-    now = datetime.now()
-    current_time_jp = now.strftime("%Y年%m月%d日 %H時%M分")
-    
+    now = datetime.now().astimezone()
+    current_time_jp = now.strftime("%Y年%m月%d日 %H時%M分%S秒")
+    current_time_iso = now.isoformat(timespec="seconds")
+
     system_prompt = (
-        f"現在時刻: {current_time_jp}\n"
-        "あなたはユーザーのルーチンやカスタムタスク、および日報（Daily Log）を管理するアシスタントです。"
-        "提供された context には直近の日報内容（recent_day_logs）も含まれています。"
-        "ユーザーが日報の内容について質問した場合は、その情報を参照して回答してください。"
-        "また、get_day_log アクションを使用して任意の日付の日報を取得することも可能です。"
-        "必ず次の JSON オブジェクトだけを返してください（コードフェンス禁止）:\n"
-        '{"reply":"日本語の返答","actions":[{"type":"create_custom_task","date":"YYYY-MM-DD","name":"タスク名","time":"HH:MM","memo":"任意メモ"},'
-        '{"type":"delete_custom_task","task_id":123},'
-        '{"type":"toggle_step","date":"YYYY-MM-DD","step_id":123,"done":true,"memo":"任意メモ"},'
-        '{"type":"toggle_custom_task","task_id":55,"done":true,"memo":"任意メモ"},'
-        '{"type":"update_custom_task_time","task_id":55,"new_time":"HH:MM"},'
-        '{"type":"rename_custom_task","task_id":55,"new_name":"新しいタスク名"},'
-        '{"type":"update_custom_task_memo","task_id":55,"new_memo":"新しいメモ"},'
-        '{"type":"update_log","date":"YYYY-MM-DD","content":"日報テキスト"},'
-        '{"type":"get_day_log","date":"YYYY-MM-DD"},'
-        '{"type":"add_routine","name":"ルーチン名","days":"0,1,2,3,4,5,6","description":"説明"},'
-        '{"type":"delete_routine","routine_id":123},'
-        '{"type":"update_routine_days","routine_id":123,"new_days":"0,1,2,3,4"}'
-        '{"type":"add_step","routine_id":123,"name":"ステップ名","time":"HH:MM","category":"Category"},'
-        '{"type":"delete_step","step_id":123},'
-        '{"type":"update_step_time","step_id":123,"new_time":"HH:MM"},'
-        '{"type":"rename_step","step_id":123,"new_name":"新しいステップ名"},'
-        '{"type":"update_step_memo","step_id":123,"new_memo":"新しいメモ"},'
-        '{"type":"list_tasks_in_period","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"},'
-        '{"type":"get_daily_summary","date":"YYYY-MM-DD"}]}\n'
-        "actions は null か空配列でも構いません。date が無い場合は today_date を使ってください。"
-        "context にある ID 以外は使わないでください。reply は日本語の文章のみで JSON を含めないでください。"
+        f"現在日時: {current_time_jp} / {current_time_iso}\n"
+        "あなたはユーザーのルーチンやカスタムタスク、日報（Daily Log）を管理するアシスタントです。"
+        "必ず提供されたツールを使ってアクションを実行し、結果を日本語で要約してください。"
+        "date を省略された場合は context に含まれる today_date を使い、存在しない ID を生成しないでください。"
+        "返信は日本語の文章のみで JSON を含めず、ツール呼び出しは必要な分だけにしてください。"
     )
 
     prompt_messages: List[Dict[str, str]] = [
@@ -250,23 +304,31 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         *messages,
     ]
 
+    if client.provider == "claude":
+        system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
+        response = client.client.messages.create(
+            model=client.model_name,
+            system=system_text,
+            messages=claude_messages,
+            temperature=0.4,
+            max_tokens=900,
+            tools=SCHEDULER_TOOLS,
+            tool_choice={"type": "auto"},
+        )
+        reply_text, actions, _ = _extract_actions_from_claude_blocks(getattr(response, "content", None))
+        return reply_text or "了解しました。", actions
+
     response = client.chat.completions.create(
         model=client.model_name,
         messages=prompt_messages,
         temperature=0.4,
         max_tokens=900,
+        tools=SCHEDULER_TOOLS,
+        tool_choice="auto",
     )
 
     message = response.choices[0].message
-    content = getattr(message, "content", "")
-    parsed, raw = _extract_json_object(content)
-    
-    if isinstance(parsed, dict):
-        reply = parsed.get("reply") if isinstance(parsed.get("reply"), str) else ""
-        actions = parsed.get("actions") if isinstance(parsed.get("actions"), list) else []
-    else:
-        # Fallback: if JSON parsing fails, assume the entire raw text is the reply.
-        reply = raw
-        actions = []
+    reply = _content_to_text(getattr(message, "content", ""))
+    actions, _ = _extract_actions_from_tool_calls(getattr(message, "tool_calls", []))
 
     return reply, actions

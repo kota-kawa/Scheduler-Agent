@@ -60,13 +60,12 @@
     -   **Logic:** Helper functions for date parsing and applying LLM-generated actions (`_apply_actions`).
 -   **`llm_client.py`:** Handles interactions with LLM providers.
     -   **`UnifiedClient`:** A provider-agnostic client that normalizes API calls to OpenAI, Anthropic, etc.
-    -   **`call_scheduler_llm`:** Constructs the system prompt and parses the JSON response from the LLM.
+    -   **`call_scheduler_llm`:** Builds the tool-calling prompt and reads tool calls from the LLM response instead of parsing ad-hoc JSON.
 -   **`model_selection.py`:** Manages available models and user selection logic. Shared logic pattern with other agents in the platform.
 
 ### LLM Interaction Protocol
--   The backend sends a structured system prompt defining the assistant's role and the available "actions" (JSON format).
--   The LLM is expected to return a JSON object containing a `reply` (text) and a list of `actions` (e.g., `create_custom_task`, `toggle_step`).
--   **`_extract_json_object`** in `llm_client.py` is used to robustly parse JSON from potentially markdown-wrapped responses.
+-   The backend sends a structured system prompt defining the assistant's role and registers tools (function calling) for each supported action.
+-   The LLM is expected to emit tool calls (e.g., `create_custom_task`, `toggle_step`) and a natural-language `reply` alongside them—no custom JSON parsing required.
 
 ### Frontend
 -   **`static/scheduler.js`:** Handles the chat interface, sending messages to `/api/chat`, and fetching/updating model settings via `/api/models` and `/model_settings`.
