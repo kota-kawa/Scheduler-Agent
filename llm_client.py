@@ -13,7 +13,7 @@ except ImportError:
     Anthropic = None
 
 from model_selection import PROVIDER_DEFAULTS, apply_model_selection
-from scheduler_tools import REVIEW_DECISION_TOOL_NAME, REVIEW_TOOLS, SCHEDULER_TOOLS
+from scheduler_tools import REVIEW_DECISION_TOOL_NAME, SCHEDULER_TOOLS
 
 
 def _content_to_text(content: Any) -> str:

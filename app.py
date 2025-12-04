@@ -1,10 +1,11 @@
 import datetime
 import calendar
 import os
+import secrets
 from typing import Any, Dict, List
+
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
 from dateutil import parser as date_parser
 from dotenv import load_dotenv
 
@@ -26,7 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-app.config['SECRET_KEY'] = 'devkey'
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///scheduler.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -162,8 +163,53 @@ def _get_timeline_data(date_obj):
     completion_rate = 0
     if total_items > 0:
         completion_rate = int((completed_items / total_items) * 100)
-        
+
     return timeline_items, completion_rate
+
+
+def _get_day_stats(day: datetime.date) -> Dict[str, Any]:
+    """Calculate statistics for a single calendar day.
+
+    Returns a dictionary containing routine/task counts, completion counts,
+    and whether a day log exists.
+    """
+    weekday = day.weekday()
+    routines = get_weekday_routines(weekday)
+    total_steps = sum(len(r.steps) for r in routines)
+
+    logs = DailyLog.query.filter_by(date=day).all()
+    completed_count = sum(1 for daily_log in logs if daily_log.done)
+
+    custom_tasks = CustomTask.query.filter_by(date=day).all()
+    total_steps += len(custom_tasks)
+    completed_count += sum(1 for task in custom_tasks if task.done)
+
+    day_log = DayLog.query.filter_by(date=day).first()
+    has_day_log = bool(day_log and day_log.content and day_log.content.strip())
+
+    return {
+        'routines': routines,
+        'custom_tasks': custom_tasks,
+        'total_routines': len(routines) + len(custom_tasks),
+        'total_steps': total_steps,
+        'completed_steps': completed_count,
+        'has_day_log': has_day_log,
+    }
+
+
+def _get_completion_color_class(total_steps: int, completed_steps: int) -> str:
+    """Return a Bootstrap color class based on completion ratio."""
+    if total_steps == 0:
+        return "bg-light"
+    ratio = completed_steps / total_steps
+    if ratio == 1.0:
+        return "bg-success text-white"
+    elif ratio > 0.5:
+        return "bg-warning"
+    elif ratio > 0:
+        return "bg-info text-white"
+    return "bg-light"
+
 
 def _build_scheduler_context(today=None):
     today = today or datetime.date.today()
@@ -780,29 +826,16 @@ def api_calendar():
         week_data = []
         for day in week:
             is_current_month = (day.month == month)
-
-            weekday = day.weekday()
-            routines = get_weekday_routines(weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = DailyLog.query.filter_by(date=day).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = CustomTask.query.filter_by(date=day).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = DayLog.query.filter_by(date=day).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
+            stats = _get_day_stats(day)
 
             week_data.append({
-                'date': day.isoformat(), # Convert date to ISO string
+                'date': day.isoformat(),  # Convert date to ISO string
                 'day_num': day.day,
                 'is_current_month': is_current_month,
-                'total_routines': len(routines) + len(custom_tasks),
-                'total_steps': total_steps,
-                'completed_steps': completed_count,
-                'has_day_log': has_day_log
+                'total_routines': stats['total_routines'],
+                'total_steps': stats['total_steps'],
+                'completed_steps': stats['completed_steps'],
+                'has_day_log': stats['has_day_log']
             })
         calendar_data.append(week_data)
 
@@ -818,111 +851,81 @@ def index():
     today = datetime.date.today()
     year = request.args.get('year', today.year, type=int)
     month = request.args.get('month', today.month, type=int)
-    
+
     if month > 12:
         month = 1
         year += 1
     elif month < 1:
         month = 12
         year -= 1
-        
-    cal = calendar.Calendar(firstweekday=0) 
+
+    cal = calendar.Calendar(firstweekday=0)
     month_days = cal.monthdatescalendar(year, month)
-    
+
     calendar_data = []
     for week in month_days:
         week_data = []
         for day in week:
             is_current_month = (day.month == month)
-            
-            weekday = day.weekday()
-            routines = get_weekday_routines(weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-            
-            logs = DailyLog.query.filter_by(date=day).all()
-            completed_count = sum(1 for l in logs if l.done)
-            
-            custom_tasks = CustomTask.query.filter_by(date=day).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
+            stats = _get_day_stats(day)
+            color_class = _get_completion_color_class(
+                stats['total_steps'], stats['completed_steps']
+            )
 
-            day_log = DayLog.query.filter_by(date=day).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            color_class = "bg-light"
-            if total_steps > 0:
-                ratio = completed_count / total_steps
-                if ratio == 1.0:
-                    color_class = "bg-success text-white"
-                elif ratio > 0.5:
-                    color_class = "bg-warning"
-                elif ratio > 0:
-                    color_class = "bg-info text-white"
-            
             week_data.append({
                 'date': day,
                 'day_num': day.day,
                 'is_current_month': is_current_month,
-                'total_routines': len(routines) + len(custom_tasks),
-                'total_steps': total_steps,
-                'completed_steps': completed_count,
+                'total_routines': stats['total_routines'],
+                'total_steps': stats['total_steps'],
+                'completed_steps': stats['completed_steps'],
                 'color_class': color_class,
-                'has_day_log': has_day_log
+                'has_day_log': stats['has_day_log']
             })
         calendar_data.append(week_data)
 
-    return render_template('index.html', 
-                           calendar_data=calendar_data, 
-                           year=year, month=month,
-                           today=today)
+    return render_template(
+        'index.html',
+        calendar_data=calendar_data,
+        year=year,
+        month=month,
+        today=today
+    )
 
 @app.route('/calendar_partial')
 def calendar_partial():
     today = datetime.date.today()
     year = request.args.get('year', today.year, type=int)
     month = request.args.get('month', today.month, type=int)
-    
+
     if month > 12:
         month = 1
         year += 1
     elif month < 1:
         month = 12
         year -= 1
-        
-    cal = calendar.Calendar(firstweekday=0) 
+
+    cal = calendar.Calendar(firstweekday=0)
     month_days = cal.monthdatescalendar(year, month)
-    
+
     calendar_data = []
     for week in month_days:
         week_data = []
         for day in week:
             is_current_month = (day.month == month)
-            
-            weekday = day.weekday()
-            routines = get_weekday_routines(weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-            
-            logs = DailyLog.query.filter_by(date=day).all()
-            completed_count = sum(1 for l in logs if l.done)
-            
-            custom_tasks = CustomTask.query.filter_by(date=day).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
+            stats = _get_day_stats(day)
 
-            day_log = DayLog.query.filter_by(date=day).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-            
             week_data.append({
                 'date': day,
                 'day_num': day.day,
                 'is_current_month': is_current_month,
-                'total_routines': len(routines) + len(custom_tasks),
-                'total_steps': total_steps,
-                'completed_steps': completed_count,
-                'has_day_log': has_day_log
+                'total_routines': stats['total_routines'],
+                'total_steps': stats['total_steps'],
+                'completed_steps': stats['completed_steps'],
+                'has_day_log': stats['has_day_log']
             })
         calendar_data.append(week_data)
-    
+
     return render_template('calendar_partial.html', calendar_data=calendar_data, today=today)
 
 
@@ -947,42 +950,21 @@ def embed_calendar():
         week_data = []
         for day in week:
             is_current_month = day.month == month
-            weekday = day.weekday()
-            routines = get_weekday_routines(weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = DailyLog.query.filter_by(date=day).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = CustomTask.query.filter_by(date=day).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = DayLog.query.filter_by(date=day).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            color_class = "bg-light"
-            if total_steps > 0:
-                ratio = completed_count / total_steps
-                if ratio == 1.0:
-                    color_class = "bg-success text-white"
-                elif ratio > 0.5:
-                    color_class = "bg-warning"
-                elif ratio > 0:
-                    color_class = "bg-info text-white"
-
-            week_data.append(
-                {
-                    "date": day,
-                    "day_num": day.day,
-                    "is_current_month": is_current_month,
-                    "total_routines": len(routines) + len(custom_tasks),
-                    "total_steps": total_steps,
-                    "completed_steps": completed_count,
-                    "color_class": color_class,
-                    "has_day_log": has_day_log,
-                }
+            stats = _get_day_stats(day)
+            color_class = _get_completion_color_class(
+                stats['total_steps'], stats['completed_steps']
             )
+
+            week_data.append({
+                "date": day,
+                "day_num": day.day,
+                "is_current_month": is_current_month,
+                "total_routines": stats['total_routines'],
+                "total_steps": stats['total_steps'],
+                "completed_steps": stats['completed_steps'],
+                "color_class": color_class,
+                "has_day_log": stats['has_day_log'],
+            })
         calendar_data.append(week_data)
 
     return render_template(

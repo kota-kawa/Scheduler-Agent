@@ -1,6 +1,6 @@
 """MCP server for Scheduler Agent."""
 import logging
-from typing import Any, List, Dict
+from typing import Any, List
 
 try:
     import mcp.types as types
@@ -13,6 +13,7 @@ from app import app, process_chat_request
 
 # Initialize MCP Server
 mcp_server = Server("scheduler-agent")
+
 
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -34,6 +35,7 @@ async def list_tools() -> list[Tool]:
         )
     ]
 
+
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: Any) -> List[types.TextContent]:
     """Handle tool calls."""
@@ -41,7 +43,7 @@ async def call_tool(name: str, arguments: Any) -> List[types.TextContent]:
         instruction = ""
         if isinstance(arguments, dict):
             instruction = arguments.get("instruction", "")
-        
+
         if not instruction:
             return [types.TextContent(type="text", text="Error: instruction is required")]
 
