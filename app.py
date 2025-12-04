@@ -261,7 +261,8 @@ def _call_conversation_review(messages: List[Dict[str, str]], context: str) -> D
     system_prompt = (
         f"現在日時: {now_text} / {now_iso}\n"
         "あなたはスケジューラーの監査担当です。会話ログを読み、必要に応じて予定・タスク・日報を更新します。"
-        "返信が必要な場合は日本語で短くまとめ、必ずツール呼び出しでアクションを提示してください。"
+        "返信が必要な場合は、機械的ではなく**フレンドリーかつ簡潔に**日本語でまとめ、必ずツール呼び出しでアクションを提示してください。"
+        "アドバイス程度なら送る必要はなく、自分が何か役に立てそうなときのみ送信するようにしてください。"
         "日付が省略された場合は context に含まれる today_date を利用してください。\n"
         "会話ログから、今日の活動記録、達成したこと、気付いたことなど、日報に残すべき重要な情報があれば、"
         "`append_day_log` ツールを使って積極的に記録してください。"
@@ -1264,6 +1265,7 @@ def review_conversation_history():
     base_reply = review.get("reply") if isinstance(review.get("reply"), str) else ""
     if base_reply:
         reply_parts.append(base_reply)
+    # Multi-Agent-Platform側での重複表示を防ぐため、ここで結果を統合し、APIレスポンスの results は空にする
     if results:
         reply_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
     if errors:
@@ -1276,7 +1278,8 @@ def review_conversation_history():
             "action_required": bool(review.get("action_required") or actions),
             "action_taken": action_taken,
             "actions": actions,
-            "results": results,
+            "results": [], # Multi-Agent-Platform での自動表示を抑制
+            "_original_results": results,
             "errors": errors,
             "modified_ids": modified_ids,
             "should_reply": bool(review.get("should_reply") or final_reply),
