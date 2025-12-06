@@ -1027,16 +1027,44 @@ def api_day_view(date_str):
     # Convert complex objects to JSON-serializable dictionaries
     serialized_timeline_items = []
     for item in timeline_items:
+        step = item['step']
+        # Handle both SQLAlchemy model objects and dicts
+        if isinstance(step, dict):
+            step_name = step.get('name', '')
+            step_category = step.get('category', 'Other')
+        else:
+            step_name = step.name
+            step_category = getattr(step, 'category', 'Other')
+        
+        routine = item['routine']
+        if isinstance(routine, dict):
+            routine_name = routine.get('name', '')
+        else:
+            routine_name = routine.name
+        
+        log = item['log']
+        if isinstance(log, dict):
+            log_done = log.get('done', False)
+            log_memo = log.get('memo')
+        elif log:
+            log_done = log.done
+            log_memo = log.memo
+        else:
+            log_done = False
+            log_memo = None
+        
+        is_done = item['real_obj'].done if item.get('real_obj') else log_done
+        
         serialized_item = {
             'type': item['type'],
             'time': item['time'],
             'id': item['id'],
-            'routine_name': item['routine']['name'],
-            'step_name': item['step']['name'],
-            'step_category': item['step'].get('category'),
-            'log_done': item['log'].done if item['log'] else False,
-            'log_memo': item['log'].memo if item['log'] else None,
-            'is_done': item['real_obj'].done if item.get('real_obj') else (item['log'].done if item['log'] else False) # For custom tasks, use 'done' directly
+            'routine_name': routine_name,
+            'step_name': step_name,
+            'step_category': step_category,
+            'log_done': log_done,
+            'log_memo': log_memo,
+            'is_done': is_done
         }
         serialized_timeline_items.append(serialized_item)
 
