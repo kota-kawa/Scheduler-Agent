@@ -9,3 +9,14 @@ services:
     environment:
       - FLASK_APP=app.py
       - FLASK_DEBUG=1
+    restart: unless-stopped
+    networks:
+      default:
+      multi_agent_network:
+        aliases:
+          - scheduler-agent
+
+networks:
+  multi_agent_network:
+    external: true
+    name: ${MULTI_AGENT_NETWORK:-multi_agent_platform_net}
