@@ -360,3 +360,88 @@ if(chatResetBtn){
   await loadChatHistory();
   updateChatControls();
 })();
+
+window.showDayRoutines = async function(weekday) {
+    const dayNames = ['月', '火', '水', '木', '金', '土', '日'];
+    const dayName = dayNames[weekday];
+    
+    const modalEl = document.getElementById('dayRoutineModal');
+    if (!modalEl) return;
+    
+    const modalTitle = document.getElementById('dayRoutineModalLabel');
+    if (modalTitle) modalTitle.textContent = `${dayName}曜日の登録ルーチン`;
+    
+    const modalBody = document.getElementById('dayRoutineModalBody');
+    if (modalBody) {
+        modalBody.innerHTML = `
+            <div class="text-center py-5">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+        `;
+    }
+    
+    // Check if modal instance already exists
+    let modal = bootstrap.Modal.getInstance(modalEl);
+    if (!modal) {
+        modal = new bootstrap.Modal(modalEl);
+    }
+    modal.show();
+    
+    try {
+        const res = await fetch(withPrefix(`/api/routines/day/${weekday}`));
+        if (!res.ok) throw new Error('Failed to fetch routines');
+        
+        const data = await res.json();
+        const routines = data.routines;
+        
+        if (routines.length === 0) {
+            modalBody.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="bi bi-calendar-x display-4 text-muted mb-3"></i>
+                    <p class="text-muted">この曜日に登録されているルーチンはありません。</p>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '<div class="list-group list-group-flush">';
+        routines.forEach(r => {
+            html += `
+                <div class="list-group-item px-0 py-3">
+                    <h5 class="mb-2 fw-bold text-dark">${r.name}</h5>
+                    ${r.description ? `<p class="text-muted small mb-2">${r.description}</p>` : ''}
+                    
+                    <div class="bg-light rounded-3 p-3 mt-2">
+                        ${r.steps.length > 0 ? 
+                            r.steps.map(s => `
+                                <div class="d-flex align-items-center mb-2 last-mb-0">
+                                    <span class="badge bg-white text-dark border me-3" style="min-width: 60px;">${s.time}</span>
+                                    <div>
+                                        <div class="fw-medium text-dark">${s.name}</div>
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary" style="font-size: 0.7rem;">${s.category}</span>
+                                    </div>
+                                </div>
+                            `).join('') 
+                            : '<div class="text-muted small fst-italic">ステップなし</div>'
+                        }
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        modalBody.innerHTML = html;
+        
+    } catch (err) {
+        console.error(err);
+        if (modalBody) {
+            modalBody.innerHTML = `
+                <div class="alert alert-danger">
+                    データの取得に失敗しました。
+                </div>
+            `;
+        }
+    }
+};

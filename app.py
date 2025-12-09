@@ -1,7 +1,7 @@
 import datetime
 import calendar
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
@@ -1180,6 +1180,29 @@ def day_view_log_partial(date_str):
     return render_template('log_partial.html', day_log=day_log)
 
 
+@app.route('/api/routines/day/<int:weekday>')
+def api_routines_by_day(weekday):
+    routines = get_weekday_routines(weekday)
+    serialized_routines = []
+    for r in routines:
+        steps = []
+        for s in r.steps:
+            steps.append({
+                'id': s.id,
+                'name': s.name,
+                'time': s.time,
+                'category': s.category
+            })
+        steps.sort(key=lambda x: x['time'])
+        
+        serialized_routines.append({
+            'id': r.id,
+            'name': r.name,
+            'description': r.description,
+            'steps': steps
+        })
+    return jsonify({'routines': serialized_routines})
+
 @app.route('/api/routines')
 def api_routines():
     routines = Routine.query.all()
@@ -1313,17 +1336,51 @@ def review_conversation_history():
     results, errors, modified_ids = _apply_actions(actions, today)
     action_taken = bool(results)
 
-    reply_parts = []
     base_reply = review.get("reply") if isinstance(review.get("reply"), str) else ""
-    if base_reply:
-        reply_parts.append(base_reply)
-    # Multi-Agent-Platform側での重複表示を防ぐため、ここで結果を統合し、APIレスポンスの results は空にする
-    if results:
-        reply_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
-    if errors:
-        reply_parts.append("処理で問題が発生しました:\n" + "\n".join(f"- {err}" for err in errors))
 
-    final_reply = "\n\n".join(part for part in reply_parts if part).strip()
+    if results or errors:
+        summary_client = UnifiedClient()
+        result_text = ""
+        if results:
+            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
+        if errors:
+            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
+
+        summary_system_prompt = (
+            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
+            "会話の流れとシステムのアクション実行結果をもとに、ユーザーへの最終的な回答を作成してください。\n"
+            "\n"
+            "## ガイドライン\n"
+            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨など）を使用し、丁寧語（です・ます）で話してください。\n"
+            "2. **分かりやすく**: 実行結果を自然な文章に統合してください。\n"
+            "3. **エラーへの対応**: エラーは優しく伝えてください。\n"
+        )
+        
+        last_user_msg = "（会話履歴からの自動対応）"
+        if history_messages and history_messages[-1]['role'] == 'user':
+             last_user_msg = history_messages[-1]['content']
+
+        summary_messages = [
+            {"role": "system", "content": summary_system_prompt},
+            {"role": "user", "content": f"直近のユーザー発言: {last_user_msg}\n\n{result_text}\n\n元のアシスタントの応答案: {base_reply}"}
+        ]
+
+        try:
+            resp = summary_client.create(
+                messages=summary_messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            final_reply = _content_to_text(resp.choices[0].message.content)
+        except Exception as e:
+            # Fallback
+            reply_parts = []
+            if base_reply: reply_parts.append(base_reply)
+            if results: reply_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
+            if errors: reply_parts.append("エラー:\n" + "\n".join(f"- {err}" for err in errors))
+            final_reply = "\n\n".join(reply_parts)
+    else:
+        final_reply = base_reply
 
     return jsonify(
         {
@@ -1340,9 +1397,22 @@ def review_conversation_history():
         }
     )
 
-def process_chat_request(user_message: str, save_history: bool = True) -> Dict[str, Any]:
+def process_chat_request(message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True) -> Dict[str, Any]:
     """Process a natural language request using the scheduler agent's logic."""
     
+    formatted_messages = []
+    user_message = ""
+
+    if isinstance(message_or_history, str):
+        user_message = message_or_history
+        formatted_messages = [{"role": "user", "content": user_message}]
+    else:
+        formatted_messages = message_or_history
+        if formatted_messages and formatted_messages[-1].get("role") == "user":
+            user_message = formatted_messages[-1].get("content", "")
+        else:
+            user_message = "(Context only)"
+
     # Save user message (optional in this context, but good for consistency if we want to track it)
     # For MCP usage, we might skip saving to ChatHistory table or save it with a special flag?
     # Let's save it for now as it's valuable debugging info.
@@ -1356,8 +1426,6 @@ def process_chat_request(user_message: str, save_history: bool = True) -> Dict[s
     today = datetime.date.today()
     context = _build_scheduler_context(today)
 
-    formatted_messages = [{"role": "user", "content": user_message}]
-
     try:
         reply_text, actions = call_scheduler_llm(formatted_messages, context)
     except Exception as exc:
@@ -1369,15 +1437,51 @@ def process_chat_request(user_message: str, save_history: bool = True) -> Dict[s
 
     results, errors, modified_ids = _apply_actions(actions, today)
 
-    message_parts = []
-    if reply_text and reply_text.strip():
-        message_parts.append(reply_text.strip())
-    if results:
-        message_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
-    if errors:
-        message_parts.append("処理で問題が発生しました:\n" + "\n".join(f"- {err}" for err in errors))
+    # If actions were executed, use the LLM to generate a friendly report of the results.
+    if results or errors:
+        summary_client = UnifiedClient()
+        
+        # Context for the summarization
+        result_text = ""
+        if results:
+            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
+        if errors:
+            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
+            
+        summary_system_prompt = (
+            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
+            "ユーザーの要望に対してシステムがアクションを実行しました。\n"
+            "その「実行結果」をもとに、ユーザーへの最終的な回答を作成してください。\n"
+            "\n"
+            "## ガイドライン\n"
+            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
+            "2. **分かりやすく**: 実行結果の羅列（「カスタムタスク[2]...」のような形式）は避け、人間が読みやすい文章に整形してください。\n"
+            "   - 例: 「12月10日の9時から『カラオケ』の予定が入っていますね！楽しんできてください🎤」\n"
+            "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
+            "4. **元の文脈を維持**: ユーザーの元の発言に対する返答として自然になるようにしてください。\n"
+        )
+        
+        summary_messages = [
+            {"role": "system", "content": summary_system_prompt},
+            {"role": "user", "content": f"ユーザーの発言: {user_message}\n\n{result_text}"}
+        ]
 
-    final_reply = "\n\n".join(message_parts) if message_parts else "了解しました。"
+        try:
+            resp = summary_client.create(
+                messages=summary_messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            final_reply = _content_to_text(resp.choices[0].message.content)
+            
+        except Exception as e:
+            # Fallback
+            final_reply = (reply_text or "") + "\n\n" + result_text
+            print(f"Summary LLM failed: {e}")
+
+    else:
+        # No actions, just use the original reply
+        final_reply = reply_text if reply_text else "了解しました。"
 
     # Save assistant reply
     if save_history:
@@ -1413,9 +1517,10 @@ def chat():
     if not formatted_messages or formatted_messages[-1]["role"] != "user":
         return jsonify({"error": "last message must be from user"}), 400
 
-    user_msg_content = formatted_messages[-1]["content"]
+    # Pass the last 10 messages to include context
+    recent_messages = formatted_messages[-10:]
     
-    result = process_chat_request(user_msg_content)
+    result = process_chat_request(recent_messages)
     
     return jsonify(result)
 

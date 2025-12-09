@@ -27,14 +27,33 @@
 </div>
 
 <div class="calendar-header">
-    <div>月</div>
-    <div>火</div>
-    <div>水</div>
-    <div>木</div>
-    <div>金</div>
-    <div>土</div>
-    <div class="text-danger">日</div>
+    <div onclick="showDayRoutines(0)" style="cursor: pointer;" title="月曜日のルーチンを確認">月</div>
+    <div onclick="showDayRoutines(1)" style="cursor: pointer;" title="火曜日のルーチンを確認">火</div>
+    <div onclick="showDayRoutines(2)" style="cursor: pointer;" title="水曜日のルーチンを確認">水</div>
+    <div onclick="showDayRoutines(3)" style="cursor: pointer;" title="木曜日のルーチンを確認">木</div>
+    <div onclick="showDayRoutines(4)" style="cursor: pointer;" title="金曜日のルーチンを確認">金</div>
+    <div onclick="showDayRoutines(5)" style="cursor: pointer;" title="土曜日のルーチンを確認">土</div>
+    <div onclick="showDayRoutines(6)" style="cursor: pointer;" title="日曜日のルーチンを確認" class="text-danger">日</div>
 </div>
 
 {% include 'calendar_partial.html' %}
+
+<!-- Day Routine Modal -->
+<div class="modal fade" id="dayRoutineModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dayRoutineModalLabel">曜日別ルーチン</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="dayRoutineModalBody">
+        <div class="text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
