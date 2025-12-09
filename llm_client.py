@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from types import SimpleNamespace
@@ -170,6 +171,16 @@ def _extract_actions_from_claude_blocks(blocks: Any) -> Tuple[str, List[Dict[str
     return "\n".join(part for part in reply_parts if part.strip()), actions, decision
 
 
+def _openai_tool_to_anthropic(openai_tool: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert OpenAI-style tool definition to Anthropic format."""
+    function_def = openai_tool.get("function", {})
+    return {
+        "name": function_def.get("name"),
+        "description": function_def.get("description"),
+        "input_schema": function_def.get("parameters"),
+    }
+
+
 class UnifiedClient:
     """Provider-agnostic chat client aligned with IoT-Agent's selection logic."""
 
@@ -282,6 +293,16 @@ def _current_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove patterns that might confuse the model, like Gemini's function call syntax."""
+    if not isinstance(text, str):
+        return str(text)
+    # Remove <function=...> tags and content if possible, or just break the tag
+    # The error showed <function=create_custom_task>{...
+    # We'll just replace <function= with (function= to break the syntax detection
+    return re.sub(r"<function=", "(function=", text)
+
+
 def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[str, List[Dict[str, Any]]]:
     """Call the selected LLM with structured tool definitions and return reply/actions."""
 
@@ -290,59 +311,95 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     current_time_jp = now.strftime("%Y年%m月%d日 %H時%M分%S秒")
     current_time_iso = now.isoformat(timespec="seconds")
 
-    system_prompt = (
+    # Sanitize inputs to prevent hallucination of tool formats
+    context = _sanitize_text(context)
+    sanitized_messages = []
+    for msg in messages:
+        sanitized_messages.append({
+            "role": msg.get("role"),
+            "content": _sanitize_text(msg.get("content", ""))
+        })
+
+    base_system_prompt = (
         f"現在日時: {current_time_jp} / {current_time_iso}\n"
-        "あなたはユーザーのルーチンやカスタムタスク、日報（Daily Log）を管理する親しみやすいアシスタントです。\n"
+        "あなたはユーザーの生活リズムを整え、日々のタスク管理をサポートする、親しみやすく頼れるパートナーAIです。\n"
+        "ユーザーの自然言語による指示を解釈し、適切なツールを選択して、ルーチンの管理、カスタムタスク（予定）の操作、日報（Daily Log）の記録を行います。\n"
         "\n"
-        "## 基本指針\n"
-        "- ユーザーへの応答は、機械的ではなく**フレンドリーに、かつ簡潔で分かりやすく**してください。\n"
-        "- 必ず提供されたツールを使ってアクションを実行し、結果を日本語で要約してください。\n"
-        "- date を省略された場合は context に含まれる today_date を使ってください。\n"
-        "- 日付指定が無い依頼は「今日」の扱いで進め、日報やタスクの読み書きも today_date を前提にしてください。日付の確認質問はユーザーが別日を示唆したときのみ行ってください。\n"
-        "- 返信は日本語の文章のみで JSON を含めず、ツール呼び出しは必要な分だけにしてください。\n"
-        "- ユーザーへの出力は、見やすく、分かりやすく、簡潔で綺麗な形式に整形してください。\n"
+        "## コンテキストとデータの取り扱い\n"
+        "1. **現在のコンテキスト**: 提供されたコンテキストには「今日」のデータ（ルーチン、タスク、ログ）のみが含まれています。\n"
+        "2. **日付指定の検索**: 「明日」「来週」「昨日」などのデータが必要な場合は、推測せずに必ず `list_tasks_in_period` や `get_day_log`、`get_daily_summary` を使用して取得してください。\n"
+        "3. **IDの厳守**: タスクやステップの完了・削除・編集を行う際は、必ずコンテキストに含まれる `id` (例: `step_id`, `task_id`) を正確に使用してください。\n"
         "\n"
-        "## エラーハンドリング・確認事項\n"
-        "- コンテキスト情報から判断して、指定されたIDのタスクが見つからない場合は、ツールを呼び出さずにその旨を優しく伝えてください。\n"
-        "- アクションに必要な情報（例: 新しいタスクの名前、移動先の日付など）が欠けている場合は、勝手に補完せず、ユーザーに詳細を確認してください。ただし日付や時間帯が無いだけのケースでは today_date/未指定のまま進めてください。\n"
+        "## ツールの選択基準\n"
+        "- **予定・スケジュール**: 外部カレンダーは使用しません。「〇〇の予定を入れて」は `create_custom_task` を使用します。\n"
+        "- **習慣・繰り返し**: 「毎週〇曜日に～する」は `add_routine` を使用します。\n"
+        "- **日報・メモ**: \n"
+        "    - 「日記をつけて」「メモして」など、その日全体の記録は `append_day_log` (追記) を優先的に使用してください。上書きしたい場合のみ `update_log` を使います。\n"
+        "    - 特定のタスクに対するメモは `update_custom_task_memo` や `update_step_memo` を使用します。\n"
+        "- **完了チェック**: タスクの完了は `toggle_custom_task`、ルーチンのステップは `toggle_step` です。\n"
         "\n"
-        "## 報告フォーマット\n"
-        "- 操作成功時: 「〇〇を追加しましたよ！」「××を更新しておきました」のように、完了したことを明るく報告してください。\n"
-        "- 操作失敗時: 「〇〇が見つかりませんでした」「〇〇の形式がちょっと違うみたいです」のように、理由を分かりやすく伝えてください。\n"
-        "- 複数のアクションを行った場合は、箇条書きなどで見やすく整理してください。\n"
+        "## 応答ガイドライン\n"
+        "- **フレンドリーに**: 機械的な応答ではなく、親しみやすい話し言葉（です・ます調）で、適度に絵文字（✨、👍、📅など）を使用してください。\n"
+        "- **明確な報告**: ツールを実行した結果は、必ずユーザーに日本語で報告してください。「〇〇を登録しました！」「××を完了にしましたお疲れ様です！」など。\n"
+        "- **不明確な指示への対応**: 必要な情報（時間、名前など）が不足している場合は、デフォルト値で強行せず、優しく聞き返してください。ただし日付が省略された場合は「今日」とみなして進めて構いません。\n"
+        "- **JSON禁止**: ユーザーへの返答（reply）には生のJSONやツールコール定義を含めず、自然な文章のみを返してください。\n"
     )
 
-    prompt_messages: List[Dict[str, str]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "system", "content": context},
-        *messages,
-    ]
+    last_exception = None
 
-    if client.provider == "claude":
-        system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
-        response = client.client.messages.create(
-            model=client.model_name,
-            system=system_text,
-            messages=claude_messages,
-            temperature=0.4,
-            max_tokens=900,
-            tools=SCHEDULER_TOOLS,
-            tool_choice={"type": "auto"},
-        )
-        reply_text, actions, _ = _extract_actions_from_claude_blocks(getattr(response, "content", None))
-        return reply_text or "了解しました。", actions
+    for attempt in range(2):
+        try:
+            current_system_prompt = base_system_prompt
+            if attempt > 0:
+                current_system_prompt += "\n\nIMPORTANT: Do NOT use '<function=' syntax. Use standard tool calls only."
 
-    response = client.chat.completions.create(
-        model=client.model_name,
-        messages=prompt_messages,
-        temperature=0.4,
-        max_tokens=900,
-        tools=SCHEDULER_TOOLS,
-        tool_choice="auto",
-    )
+            prompt_messages: List[Dict[str, str]] = [
+                {"role": "system", "content": current_system_prompt},
+                {"role": "system", "content": context},
+                *sanitized_messages,
+            ]
 
-    message = response.choices[0].message
-    reply = _content_to_text(getattr(message, "content", ""))
-    actions, _ = _extract_actions_from_tool_calls(getattr(message, "tool_calls", []))
+            if client.provider == "claude":
+                system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
+                
+                anthropic_tools = [_openai_tool_to_anthropic(t) for t in SCHEDULER_TOOLS]
+                
+                response = client.client.messages.create(
+                    model=client.model_name,
+                    system=system_text,
+                    messages=claude_messages,
+                    temperature=0.4,
+                    max_tokens=1500,
+                    tools=anthropic_tools,
+                    tool_choice={"type": "auto"},
+                )
+                reply_text, actions, _ = _extract_actions_from_claude_blocks(getattr(response, "content", None))
+                return reply_text or "了解しました。", actions
 
-    return reply, actions
+            response = client.chat.completions.create(
+                model=client.model_name,
+                messages=prompt_messages,
+                temperature=0.4,
+                max_tokens=1500,
+                tools=SCHEDULER_TOOLS,
+                tool_choice="auto",
+            )
+
+            message = response.choices[0].message
+            reply = _content_to_text(getattr(message, "content", ""))
+            actions, _ = _extract_actions_from_tool_calls(getattr(message, "tool_calls", []))
+
+            return reply, actions
+
+        except Exception as e:
+            last_exception = e
+            err_str = str(e)
+            # Check for Anthropic tool_use_failed or similar
+            if attempt == 0 and ("tool_use_failed" in err_str or "failed_generation" in err_str or "400" in err_str):
+                # Retry with stricter prompt
+                continue
+            raise e
+
+    if last_exception:
+        raise last_exception
+    return "エラーが発生しました。", []

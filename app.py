@@ -261,6 +261,10 @@ def _call_conversation_review(messages: List[Dict[str, str]], context: str) -> D
     system_prompt = (
         f"現在日時: {now_text} / {now_iso}\n"
         "あなたは「スケジュール・タスク管理専門」のアシスタントです。\n\n"
+
+        "【用語の定義】\n"
+        "- 「予定」「スケジュール」→ カスタムタスク (Custom Task)\n"
+        "- 「記録」「メモ」→ 日報 (Daily Log)\n\n"
         
         "【あなたの専門分野（発言可能な範囲）】\n"
         "- 予定管理: 予定の追加・変更・削除・確認\n"

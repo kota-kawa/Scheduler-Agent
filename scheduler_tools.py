@@ -29,7 +29,7 @@ REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         "create_custom_task",
-        "日付・時間・名前を指定してカスタムタスクを追加します。日付を省略した場合は today_date を使ってください。",
+        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付を省略した場合は today_date を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "name": {"type": "string", "description": "タスク名"},
@@ -94,7 +94,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "update_log",
-        "指定日付の日報を上書き保存します。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）を上書き保存します。日付が無い場合は today_date を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "日報本文"},
@@ -103,7 +103,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "append_day_log",
-        "指定日付の日報に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "追記する内容"},
@@ -112,7 +112,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "get_day_log",
-        "指定日付の日報を取得します。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）を取得します。日付が無い場合は today_date を使ってください。",
         {"date": {"type": "string", "description": "YYYY-MM-DD"}},
     ),
     _build_tool(
