@@ -1,6 +1,7 @@
 import datetime
 import calendar
 import os
+import json
 from typing import Any, Dict, List, Union
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
@@ -27,8 +28,13 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['SECRET_KEY'] = 'devkey'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///scheduler.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(app.instance_path, 'scheduler.db')}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+try:
+    os.makedirs(app.instance_path)
+except OSError:
+    pass
 
 db = SQLAlchemy(app)
 
@@ -80,6 +86,16 @@ class ChatHistory(db.Model):
     role = db.Column(db.String(20), nullable=False)
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.now)
+
+class EvaluationResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.now)
+    model_name = db.Column(db.String(100))
+    task_prompt = db.Column(db.Text)
+    agent_reply = db.Column(db.Text)
+    tool_calls = db.Column(db.Text) # JSON string
+    is_success = db.Column(db.Boolean)
+    comments = db.Column(db.Text)
 
 # Initialize DB
 with app.app_context():
@@ -378,7 +394,7 @@ def _apply_actions(actions, default_date):
                 new_task = CustomTask(date=date_value, name=name.strip(), time=time_value.strip(), memo=memo.strip())
                 db.session.add(new_task)
                 db.session.flush() # Get ID
-                results.append(f"カスタムタスク「{new_task.name}」を {date_value} の {new_task.time} に追加しました。")
+                results.append(f"カスタムタスク「{new_task.name}」(ID: {new_task.id}) を {date_value} の {new_task.time} に追加しました。")
                 modified_ids.append(f"item_custom_{new_task.id}")
                 dirty = True
                 continue
@@ -573,7 +589,8 @@ def _apply_actions(actions, default_date):
                 desc = action.get("description", "")
                 r = Routine(name=name, days=days, description=desc)
                 db.session.add(r)
-                results.append(f"ルーチン「{name}」を追加しました。")
+                db.session.flush()
+                results.append(f"ルーチン「{name}」(ID: {r.id}) を追加しました。")
                 dirty = True
                 continue
                 
@@ -617,7 +634,7 @@ def _apply_actions(actions, default_date):
                 s = Step(routine_id=int(rid), name=name, time=action.get("time", "00:00"), category=action.get("category", "Other"))
                 db.session.add(s)
                 db.session.flush()
-                results.append(f"ステップ「{name}」を追加しました。")
+                results.append(f"ルーチン(ID:{rid})にステップ「{name}」(ID: {s.id}) を追加しました。")
                 modified_ids.append(f"item_routine_{s.id}")
                 dirty = True
                 continue
@@ -1153,8 +1170,9 @@ def day_view(date_str):
     # GET
     timeline_items, completion_rate = _get_timeline_data(date_obj)
     day_log = DayLog.query.filter_by(date=date_obj).first()
+    routines = get_weekday_routines(date_obj.weekday())
     
-    return render_template('day.html', date=date_obj, timeline_items=timeline_items, day_log=day_log, completion_rate=completion_rate)
+    return render_template('day.html', date=date_obj, timeline_items=timeline_items, day_log=day_log, completion_rate=completion_rate, routines=routines)
 
 @app.route('/day/<date_str>/timeline')
 def day_view_timeline(date_str):
@@ -1523,6 +1541,305 @@ def chat():
     result = process_chat_request(recent_messages)
     
     return jsonify(result)
+
+# --- Evaluation Routes ---
+
+@app.route('/evaluation')
+def evaluation_page():
+    return render_template('evaluation.html')
+
+@app.post("/api/evaluation/chat")
+def evaluation_chat():
+    payload = request.get_json(silent=True) or {}
+    messages = payload.get("messages", [])
+    if not isinstance(messages, list):
+        return jsonify({"error": "messages must be a list"}), 400
+
+    formatted_messages = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        content = msg.get("content")
+        if role not in {"system", "user", "assistant"} or not isinstance(content, str):
+            continue
+        formatted_messages.append({"role": role, "content": content})
+
+    if not formatted_messages or formatted_messages[-1]["role"] != "user":
+        return jsonify({"error": "last message must be from user"}), 400
+
+    # Custom logic for evaluation to return full details
+    today = datetime.date.today()
+    context = _build_scheduler_context(today)
+
+    try:
+        reply_text, actions = call_scheduler_llm(formatted_messages, context)
+    except Exception as exc:
+        return jsonify({"error": f"LLM Error: {exc}"}), 500
+
+    results, errors, modified_ids = _apply_actions(actions, today)
+    
+    # Generate summary if needed, similar to main chat
+    final_reply = reply_text
+    if results or errors:
+        summary_client = UnifiedClient()
+        result_text = ""
+        if results:
+            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
+        if errors:
+            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
+            
+        summary_system_prompt = (
+            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
+            "ユーザーの要望に対してシステムがアクションを実行しました。\n"
+            "その「実行結果」をもとに、ユーザーへの最終的な回答を作成してください。\n"
+            "\n"
+            "## ガイドライン\n"
+            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
+            "2. **分かりやすく**: 実行結果の羅列は避け、人間が読みやすい文章に整形してください。\n"
+            "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
+        )
+        user_message = formatted_messages[-1]["content"]
+        summary_messages = [
+            {"role": "system", "content": summary_system_prompt},
+            {"role": "user", "content": f"ユーザーの発言: {user_message}\n\n{result_text}"}
+        ]
+        try:
+            resp = summary_client.create(
+                messages=summary_messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            final_reply = _content_to_text(resp.choices[0].message.content)
+        except Exception:
+            final_reply = (reply_text or "") + "\n\n" + result_text
+
+    return jsonify({
+        "reply": final_reply,
+        "raw_reply": reply_text,
+        "actions": actions,
+        "results": results,
+        "errors": errors
+    })
+
+@app.post("/api/evaluation/reset")
+def evaluation_reset():
+    try:
+        db.session.query(DailyLog).delete()
+        db.session.query(CustomTask).delete()
+        db.session.query(Step).delete()
+        db.session.query(Routine).delete()
+        db.session.query(DayLog).delete()
+        # db.session.query(EvaluationResult).delete() # Keep history? User said "delete all recorded data".
+        # Assuming this refers to the Scheduler data to reset the test environment.
+        db.session.commit()
+        return jsonify({"status": "ok", "message": "Scheduler data cleared."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/evaluation/seed")
+def evaluation_seed():
+    try:
+        date_str = request.json.get("date")
+        if date_str:
+            target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.date.today()
+        
+        messages = _seed_evaluation_data(target_date, target_date)
+        return jsonify({"status": "ok", "message": "; ".join(messages)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/evaluation/seed_period")
+def evaluation_seed_period():
+    try:
+        start_date_str = request.json.get("start_date")
+        end_date_str = request.json.get("end_date")
+
+        if not start_date_str or not end_date_str:
+            return jsonify({"error": "start_date and end_date are required"}), 400
+
+        start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+
+        if start_date > end_date:
+            return jsonify({"error": "start_date cannot be after end_date"}), 400
+        
+        messages = _seed_evaluation_data(start_date, end_date)
+        return jsonify({"status": "ok", "message": "; ".join(messages)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+def _seed_evaluation_data(start_date: datetime.date, end_date: datetime.date):
+    messages = []
+    
+    # Ensure Daily Routine exists
+    routine_name = "Daily Routine"
+    daily_routine = Routine.query.filter_by(name=routine_name).first()
+    if not daily_routine:
+        daily_routine = Routine(name=routine_name, days="0,1,2,3,4,5,6", description="General daily habits")
+        db.session.add(daily_routine)
+        db.session.flush() # get ID
+        
+        steps_data = [
+            ("07:00", "Wake up", "Lifestyle"),
+            ("08:00", "Breakfast", "Lifestyle"),
+            ("09:00", "Check Emails", "Browser"),
+            ("12:00", "Lunch", "Lifestyle"),
+            ("18:00", "Workout", "Lifestyle"),
+            ("22:00", "Read Book", "Lifestyle")
+        ]
+        for time, name, category in steps_data:
+            s = Step(routine_id=daily_routine.id, name=name, time=time, category=category)
+            db.session.add(s)
+        messages.append(f"Seeded Routine '{routine_name}'")
+
+    current_date = start_date
+    while current_date <= end_date:
+        # Clear existing data for the current date
+        DailyLog.query.filter_by(date=current_date).delete()
+        CustomTask.query.filter_by(date=current_date).delete()
+        DayLog.query.filter_by(date=current_date).delete()
+        messages.append(f"Cleared existing data for {current_date.isoformat()}")
+
+        # Seed DayLog
+        log_content = f"これは{current_date.isoformat()}の評価用日報です。今日の気分は最高です！"
+        db.session.add(DayLog(date=current_date, content=log_content))
+        messages.append(f"Seeded DayLog for {current_date.isoformat()}")
+
+        # Seed Custom Tasks
+        db.session.add(CustomTask(date=current_date, name=f"ミーティング ({current_date.day}日)", time="10:00", memo="重要な議題"))
+        db.session.add(CustomTask(date=current_date, name=f"レポート作成 ({current_date.day}日)", time="14:00", memo="期限は明日"))
+        messages.append(f"Seeded Custom Tasks for {current_date.isoformat()}")
+        
+        # Mark some routine steps as done randomly to simulate progress
+        if daily_routine:
+            all_steps = Step.query.filter_by(routine_id=daily_routine.id).all()
+            if all_steps:
+                if len(all_steps) >= 1:
+                    log_entry = DailyLog(date=current_date, step_id=all_steps[0].id, done=True, memo="朝の活動完了")
+                    db.session.add(log_entry)
+                    messages.append(f"Marked step '{all_steps[0].name}' as done for {current_date.isoformat()}")
+                if len(all_steps) >= 3:
+                    log_entry = DailyLog(date=current_date, step_id=all_steps[2].id, done=True, memo="メールチェック完了")
+                    db.session.add(log_entry)
+                    messages.append(f"Marked step '{all_steps[2].name}' as done for {current_date.isoformat()}")
+
+        current_date += datetime.timedelta(days=1)
+    
+    db.session.commit()
+    return messages
+
+@app.post("/api/add_sample_data")
+def add_sample_data():
+    try:
+        today = datetime.date.today()
+        messages = []
+
+        # 1. DayLog for last Friday (Existing logic)
+        # 0=Mon, 4=Fri.
+        days_behind = (today.weekday() - 4) % 7
+        if days_behind <= 0:
+             days_behind += 7
+        last_friday = today - datetime.timedelta(days=days_behind)
+        
+        log = DayLog.query.filter_by(date=last_friday).first()
+        if not log:
+            log = DayLog(date=last_friday, content="先週の金曜日はとても良い天気でした。プロジェクトの進捗も順調でした。")
+            db.session.add(log)
+            messages.append(f"Seeded DayLog for {last_friday}")
+        
+        # 2. Daily Routine
+        routine_name = "Daily Routine"
+        daily_routine = Routine.query.filter_by(name=routine_name).first()
+        if not daily_routine:
+            daily_routine = Routine(name=routine_name, days="0,1,2,3,4,5,6", description="General daily habits")
+            db.session.add(daily_routine)
+            db.session.flush() # get ID
+            
+            steps_data = [
+                ("07:00", "Wake up", "Lifestyle"),
+                ("08:00", "Breakfast", "Lifestyle"),
+                ("09:00", "Check Emails", "Browser")
+            ]
+            for time, name, category in steps_data:
+                s = Step(routine_id=daily_routine.id, name=name, time=time, category=category)
+                db.session.add(s)
+            messages.append(f"Seeded Routine '{routine_name}'")
+        
+        # 3. Custom Tasks
+        
+        # Task for Today
+        task_name = "Buy Milk"
+        if not CustomTask.query.filter_by(date=today, name=task_name).first():
+            db.session.add(CustomTask(date=today, name=task_name, time="18:00", memo="Low fat"))
+            messages.append(f"Seeded Task '{task_name}' for Today ({today})")
+
+        # Task for Tomorrow
+        tomorrow = today + datetime.timedelta(days=1)
+        tasks_tomorrow = [
+            ("13:00", "Lunch with Alice", "At the Italian place"),
+            ("15:00", "Doctor Appointment", "Bring ID")
+        ]
+        for time, name, memo in tasks_tomorrow:
+            if not CustomTask.query.filter_by(date=tomorrow, name=name).first():
+                db.session.add(CustomTask(date=tomorrow, name=name, time=time, memo=memo))
+                messages.append(f"Seeded Task '{name}' for Tomorrow ({tomorrow})")
+
+        # Task for Day after Tomorrow
+        day_after = today + datetime.timedelta(days=2)
+        task_name_da = "Gym"
+        if not CustomTask.query.filter_by(date=day_after, name=task_name_da).first():
+            db.session.add(CustomTask(date=day_after, name=task_name_da, time="19:00", memo="Leg day"))
+            messages.append(f"Seeded Task '{task_name_da}' for Day after Tomorrow ({day_after})")
+
+        db.session.commit()
+        
+        if not messages:
+            return jsonify({"status": "ok", "message": "Data already exists, nothing new seeded."})
+            
+        return jsonify({"status": "ok", "message": "; ".join(messages)})
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/evaluation/log")
+def evaluation_log():
+    data = request.get_json(silent=True) or {}
+    try:
+        res = EvaluationResult(
+            model_name=data.get("model_name"),
+            task_prompt=data.get("task_prompt"),
+            agent_reply=data.get("agent_reply"),
+            tool_calls=json.dumps(data.get("tool_calls", [])),
+            is_success=data.get("is_success"),
+            comments=data.get("comments")
+        )
+        db.session.add(res)
+        db.session.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.get("/api/evaluation/history")
+def evaluation_history():
+    results = EvaluationResult.query.order_by(EvaluationResult.timestamp.desc()).all()
+    data = []
+    for r in results:
+        data.append({
+            "id": r.id,
+            "timestamp": r.timestamp.isoformat(),
+            "model_name": r.model_name,
+            "task_prompt": r.task_prompt,
+            "is_success": r.is_success
+        })
+    return jsonify({"history": data})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5010, debug=True)
