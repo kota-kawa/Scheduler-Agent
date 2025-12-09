@@ -1,0 +1,88 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-clipboard-check me-2"></i>評価・テスト実行</h2>
+    <div>
+        <button id="seedBtn" class="btn btn-outline-success me-2">
+            <i class="bi bi-database-add me-1"></i>サンプルデータ追加
+        </button>
+        <button id="seedPeriodBtn" class="btn btn-outline-info me-2">
+            <i class="bi bi-calendar-range me-1"></i>明日〜明後日データ追加
+        </button>
+        <button id="resetBtn" class="btn btn-outline-danger">
+            <i class="bi bi-trash me-1"></i>全データ削除
+        </button>
+    </div>
+</div>
+
+<div class="alert alert-light border shadow-sm mb-4">
+    <h5 class="alert-heading"><i class="bi bi-info-circle me-2"></i>使い方</h5>
+    <p class="mb-0 small text-muted">
+        左サイドバーでモデルを選択し、以下のシナリオを順に実行して動作を確認してください。<br>
+        「サンプルデータ追加」を押すと、テストに必要な過去ログ（先週金曜日）が生成されます。<br>
+        「明日〜明後日データ追加」を押すと、明日と明後日にサンプル予定が追加されます（「明日から明後日までの予定を教えて」のテスト用）。<br>
+        「全データ削除」を押すと、スケジューラーの全データが初期化されます。
+    </p>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <h5 class="mb-0">テストシナリオ一覧</h5>
+        <button id="runAllBtn" class="btn btn-primary btn-sm" disabled>
+            <i class="bi bi-play-circle me-1"></i>一括実行 (未実装)
+        </button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="evalTable">
+            <thead class="table-light">
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th style="width: 35%;">指示 (Prompt)</th>
+                    <th style="width: 40%;">実行結果 (Result)</th>
+                    <th style="width: 20%;" class="text-center">操作 / 判定</th>
+                </tr>
+            </thead>
+            <tbody id="evalTableBody">
+                <!-- Javascript will populate this -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white py-3">
+        <h5 class="mb-0">カレンダー確認</h5>
+    </div>
+    <div class="card-body p-0">
+        <iframe id="calendarFrame" src="{{ url_for('embed_calendar') }}" style="width: 100%; height: 600px; border: none;"></iframe>
+    </div>
+</div>
+
+<!-- Template for Row -->
+<template id="rowTemplate">
+    <tr class="eval-row">
+        <td class="row-index fw-bold text-muted"></td>
+        <td class="row-prompt text-wrap" style="max-width: 300px;"></td>
+        <td class="row-result">
+            <div class="result-placeholder text-muted small">未実行</div>
+            <div class="result-content d-none">
+                <div class="agent-reply mb-2 small bg-light p-2 rounded"></div>
+                <div class="tool-calls small font-monospace text-primary"></div>
+            </div>
+        </td>
+        <td class="text-center">
+            <button class="btn btn-sm btn-outline-primary run-btn">
+                <i class="bi bi-play-fill"></i> 実行
+            </button>
+            <div class="judgment-btns d-none mt-2">
+                <button class="btn btn-sm btn-success success-btn me-1" title="成功"><i class="bi bi-check-lg"></i></button>
+                <button class="btn btn-sm btn-danger fail-btn" title="失敗"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div class="judgment-result mt-2 fw-bold small"></div>
+        </td>
+    </tr>
+</template>
+
+<script src="{{ url_for('static', filename='evaluation.js') }}"></script>
+{% endblock %}

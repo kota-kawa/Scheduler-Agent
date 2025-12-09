@@ -67,6 +67,10 @@ async function loadModelOptions(){
     if(!res.ok){
       throw new Error(`HTTP ${res.status}`);
     }
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error("Response is not JSON");
+    }
     const data = await res.json();
     if(Array.isArray(data.models)){
       availableModels = data.models.filter(
@@ -161,7 +165,13 @@ function pushMessage(role, text, timestamp = null) {
 async function loadChatHistory() {
   try {
     const res = await fetch(withPrefix("/api/chat/history"));
-    if (!res.ok) return; // If failed, just start fresh
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error("Response is not JSON");
+    }
     const data = await res.json();
     
     if (data.history && data.history.length > 0) {
@@ -207,6 +217,10 @@ async function requestAssistantResponse(){
     throw new Error(errText || `HTTP ${res.status}`);
   }
 
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("Response is not JSON");
+  }
   return await res.json();
 }
 
@@ -360,6 +374,36 @@ if(chatResetBtn){
   await loadChatHistory();
   updateChatControls();
 })();
+
+const addSampleDataButton = $("#addSampleDataButton");
+if (addSampleDataButton) {
+  addSampleDataButton.addEventListener("click", async () => {
+    if (!confirm("明日と明後日のサンプルデータを追加しますか？\n（既存のデータは削除されません）")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(withPrefix("/api/add_sample_data"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      alert(`サンプルデータが追加されました！\n${data.message}`);
+      
+      window.location.reload();
+
+    } catch (err) {
+      console.error("サンプルデータの追加に失敗しました:", err);
+      alert(`サンプルデータの追加に失敗しました: ${err.message}`);
+    }
+  });
+}
 
 window.showDayRoutines = async function(weekday) {
     const dayNames = ['月', '火', '水', '木', '金', '土', '日'];

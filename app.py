@@ -1641,7 +1641,12 @@ def evaluation_reset():
 @app.post("/api/evaluation/seed")
 def evaluation_seed():
     try:
-        date_str = request.json.get("date")
+        payload = request.get_json(silent=True) or {}
+        date_str = (
+            payload.get("date")
+            or request.args.get("date")
+            or request.form.get("date")
+        )
         if date_str:
             target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
         else:
@@ -1656,8 +1661,17 @@ def evaluation_seed():
 @app.post("/api/evaluation/seed_period")
 def evaluation_seed_period():
     try:
-        start_date_str = request.json.get("start_date")
-        end_date_str = request.json.get("end_date")
+        payload = request.get_json(silent=True) or {}
+        start_date_str = (
+            payload.get("start_date")
+            or request.args.get("start_date")
+            or request.form.get("start_date")
+        )
+        end_date_str = (
+            payload.get("end_date")
+            or request.args.get("end_date")
+            or request.form.get("end_date")
+        )
 
         if not start_date_str or not end_date_str:
             return jsonify({"error": "start_date and end_date are required"}), 400

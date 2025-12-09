@@ -33,6 +33,49 @@
         <!-- Main Schedule Card -->
         {% include 'timeline_partial.html' %}
 
+        <!-- Registered Routines Card -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white border-0 pt-4 px-4">
+                 <h6 class="text-uppercase text-muted mb-1">Registered Routines</h6>
+                 <h5 class="fw-bold mb-0">本日の登録ルーチン</h5>
+            </div>
+            <div class="card-body px-4">
+                {% if routines and routines|length > 0 %}
+                    <div class="list-group list-group-flush">
+                    {% for routine in routines %}
+                        <div class="list-group-item px-0 py-3 border-light">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0 fw-bold text-dark"><i class="bi bi-repeat me-2 text-primary"></i>{{ routine.name }}</h6>
+                                <span class="badge bg-light text-secondary border">{{ routine.steps|length }} Steps</span>
+                            </div>
+                            {% if routine.description %}
+                                <p class="small text-muted mb-2 ps-4">{{ routine.description }}</p>
+                            {% endif %}
+                            
+                            <div class="bg-light bg-opacity-50 rounded-3 p-3 mt-2 ms-4">
+                                {% if routine.steps|length == 0 %}
+                                    <span class="small text-muted">ステップなし</span>
+                                {% else %}
+                                    {% for step in routine.steps|sort(attribute='time') %}
+                                        <div class="d-flex small text-secondary mb-1 align-items-center">
+                                            <span class="fw-medium text-dark me-2 font-monospace" style="min-width: 45px;">{{ step.time }}</span>
+                                            <span class="me-auto">{{ step.name }}</span>
+                                            <span class="badge bg-white text-muted border ms-2" style="font-size: 0.65rem;">{{ step.category }}</span>
+                                        </div>
+                                    {% endfor %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <p class="text-muted mb-0">本日の登録ルーチンはありません。</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- Daily Log Card -->
         <div id="daily-log-wrapper">
             {% include 'log_partial.html' %}
