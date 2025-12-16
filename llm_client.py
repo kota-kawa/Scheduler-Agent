@@ -308,7 +308,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
 
     client = UnifiedClient()
     now = datetime.now().astimezone()
-    current_time_jp = now.strftime("%Y年%m月%d日 %H時%M分%S秒")
+    current_time_jp = now.strftime("%Y年%m月%d日 (%A) %H時%M分%S秒")
     current_time_iso = now.isoformat(timespec="seconds")
 
     # Sanitize inputs to prevent hallucination of tool formats
