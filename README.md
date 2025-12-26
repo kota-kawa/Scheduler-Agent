@@ -217,3 +217,8 @@ docker compose up --build web
 
 **English**
 When contributing, run the manual checks above and include behavior changes, env var impacts, and UI screenshots in your PR.
+
+## ライセンス / License
+このプロジェクトは MIT ライセンスの下で公開されています。詳細は [LICENSE.md](LICENSE.md) をご覧ください。
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
