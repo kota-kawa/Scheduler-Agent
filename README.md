@@ -1,6 +1,7 @@
+# Scheduler-Agent
+
 <img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
 
-# Scheduler-Agent
 
 ## 概要
 Scheduler-Agent は、日次ルーチンとカスタムタスクを 1 つのタイムラインで可視化し、LLM チャットや MCP (Model Context Protocol) ツール経由で自然言語操作できる Flask アプリです。ブラウザ UI / IoT-Agent / 外部エージェントが同じバックエンド API・DB を共有する設計になっています。
