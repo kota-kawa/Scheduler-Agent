@@ -1,3 +1,5 @@
+<img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
+
 # Scheduler-Agent
 
 ## 概要
