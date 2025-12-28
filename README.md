@@ -203,13 +203,13 @@ docker compose up --build web
 
 ## トラブルシュート
 - **API キー未設定**: `UnifiedClient` 初期化で例外が出るので `secrets.env` を確認。
-- **モデル設定エラー**: `MULTI_AGENT_SETTINGS_PATH` が壊れている場合はデフォルト (OpenAI gpt-5.1) にフォールバック。
+- **モデル設定エラー**: `MULTI_AGENT_SETTINGS_PATH` が壊れている場合はデフォルト (Groq GPT-OSS) にフォールバック。
 - **SQLite ロック/破損**: Dev server の多重起動を避け、必要なら `instance/scheduler.db` を削除後に再起動。
 - **MCP SSE 404**: 逆プロキシ配下では `SCRIPT_NAME`（`proxy_prefix`）が正しく渡っているか確認。
 
 **Troubleshooting (English)**
 - **Missing API keys:** `UnifiedClient` will throw; populate `secrets.env` with the required keys.
-- **Broken model settings:** Invalid `MULTI_AGENT_SETTINGS_PATH` JSON falls back to the OpenAI gpt-5.1 default.
+- **Broken model settings:** Invalid `MULTI_AGENT_SETTINGS_PATH` JSON falls back to the Groq GPT-OSS default.
 - **SQLite lock/corruption:** Avoid running multiple dev servers simultaneously; delete `instance/scheduler.db` and restart if needed.
 - **MCP SSE 404:** Ensure `SCRIPT_NAME`/`proxy_prefix` is forwarded correctly when behind a reverse proxy.
 

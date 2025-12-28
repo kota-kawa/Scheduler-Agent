@@ -46,7 +46,7 @@ function populateModelSelect(){
 
   const options = availableModels.length
     ? availableModels
-    : [{ ...DEFAULT_MODEL, label: "Default (GPT-OSS 20B)" }];
+    : [{ ...DEFAULT_MODEL, label: "GPT-OSS 20B (Groq)" }];
 
   options.forEach((m) => {
     const option = document.createElement("option");
