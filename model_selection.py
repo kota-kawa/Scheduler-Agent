@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 # Multi-Agent-Platform の設定モーダルと揃えるデフォルト
-DEFAULT_SELECTION = {"provider": "openai", "model": "gpt-5.1", "base_url": ""}
+DEFAULT_SELECTION = {"provider": "groq", "model": "openai/gpt-oss-20b", "base_url": ""}
 
 AVAILABLE_MODELS: List[Dict[str, str]] = [
+    # Groq
+    {"provider": "groq", "model": "openai/gpt-oss-20b", "label": "GPT-OSS 20B (Groq)"},
+
     # OpenAI
     {"provider": "openai", "model": "gpt-5.1", "label": "GPT-5.1"},
 
@@ -25,7 +28,6 @@ AVAILABLE_MODELS: List[Dict[str, str]] = [
     # Groq
     {"provider": "groq", "model": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B (Groq)"},
     {"provider": "groq", "model": "llama-3.1-8b-instant", "label": "Llama 3.1 8B (Groq)"},
-    {"provider": "groq", "model": "openai/gpt-oss-20b", "label": "GPT-OSS 20B (Groq)"},
     {"provider": "groq", "model": "qwen/qwen3-32b", "label": "Qwen3 32B (Groq)"},
 ]
 
