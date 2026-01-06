@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ルーチン・スケジューラー</title>
-    {% set base_href = (request.script_root or '') + '/' %}
+    {% set base_href = (proxy_prefix or '') + '/' %}
     <base href="{{ base_href }}">
-    <meta name="proxy-prefix" content="{{ request.script_root or '' }}">
-    <link rel="icon" href="{{ url_for('static', filename='Scheduler-Agent.ico') }}" type="image/x-icon">
-    <link rel="icon" href="{{ url_for('static', filename='Scheduler-Agent.png') }}" type="image/png">
+    <meta name="proxy-prefix" content="{{ proxy_prefix or '' }}">
+    <link rel="icon" href="{{ url_for('static', path='Scheduler-Agent.ico') }}" type="image/x-icon">
+    <link rel="icon" href="{{ url_for('static', path='Scheduler-Agent.png') }}" type="image/png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', path='style.css') }}" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
 </head>
 <body>
@@ -101,6 +101,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='scheduler.js') }}"></script>
+    <script src="{{ url_for('static', path='scheduler.js') }}"></script>
 </body>
 </html>

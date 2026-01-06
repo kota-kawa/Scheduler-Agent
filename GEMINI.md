@@ -1,10 +1,10 @@
 # Project Context: Scheduler Agent
 
 ## Project Overview
-**Scheduler Agent** is a Flask-based web application designed to help users manage their daily routines, custom tasks, and daily logs. It features a chat interface powered by Large Language Models (LLMs) that allows users to interact with their schedule using natural language (Japanese).
+**Scheduler Agent** is a FastAPI-based web application designed to help users manage their daily routines, custom tasks, and daily logs. It features a chat interface powered by Large Language Models (LLMs) that allows users to interact with their schedule using natural language (Japanese).
 
 ### Key Technologies
--   **Backend:** Python, Flask, SQLAlchemy (SQLite)
+-   **Backend:** Python, FastAPI, SQLAlchemy (PostgreSQL)
 -   **LLM Integration:** OpenAI, Google Gemini, Anthropic Claude, Groq
 -   **Frontend:** HTML (Jinja2), CSS, JavaScript (Vanilla)
 -   **Containerization:** Docker, Docker Compose
@@ -34,13 +34,9 @@
     ```bash
     pip install -r requirements.txt
     ```
-2.  **Initialize Database:**
+2.  **Run Application:**
     ```bash
-    python -c "from app import app, db; app.app_context().push(); db.create_all()"
-    ```
-3.  **Run Application:**
-    ```bash
-    python app.py
+    uvicorn app:app --reload --port 5000
     ```
     The app will be available at `http://localhost:5000`.
 
@@ -54,7 +50,7 @@
 ## Development Conventions
 
 ### Architecture
--   **`app.py`:** The main Flask application file. It contains:
+-   **`app.py`:** The main FastAPI application file. It contains:
     -   **Database Models:** `Routine`, `Step`, `DailyLog`, `CustomTask`, `DayLog`.
     -   **Routes:** Web UI routes (`/`, `/day/<date>`, `/routines`) and API routes (`/api/chat`, `/api/models`).
     -   **Logic:** Helper functions for date parsing and applying LLM-generated actions (`_apply_actions`).
@@ -72,7 +68,7 @@
 -   **`templates/`:** Standard Jinja2 templates extending `layout.html`.
 
 ### Database
--   **SQLite:** stored in `instance/scheduler.db`.
+-   **PostgreSQL:** configured via `DATABASE_URL`.
 -   **Schema:**
     -   `Routine` -> `Step` (One-to-Many)
     -   `DailyLog` links to `Step` for specific dates.
