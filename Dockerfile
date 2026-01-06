@@ -9,9 +9,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 
 # Create virtual environment outside of /app to avoid bind mount issues
-RUN uv venv /venv
+ENV UV_PROJECT_ENVIRONMENT=/venv
+ENV VIRTUAL_ENV=/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+RUN uv venv $VIRTUAL_ENV
+
 # Install dependencies into that environment
-RUN uv sync --frozen --no-dev --project-environment /venv
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application code
 COPY . .
@@ -20,6 +24,5 @@ COPY . .
 EXPOSE 5010
 
 # Run application using the virtual environment
-ENV PATH="/venv/bin:$PATH"
 CMD ["uvicorn", "asgi:app", "--host", "0.0.0.0", "--port", "5010"]
 
