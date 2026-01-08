@@ -1141,7 +1141,114 @@ def agent_result(request: Request, db: Session = Depends(get_db)):
     return template_response(
         request,
         "agent_result.html",
-        {"calendar_data": calendar_data, "year": year, "month": month, "today": today},
+        {
+            "calendar_data": calendar_data,
+            "year": year,
+            "month": month,
+            "today": today,
+            "day_view_endpoint": "agent_day_view",
+        },
+    )
+
+
+@app.api_route(
+    "/agent-result/day/{date_str}", methods=["GET", "POST"], response_class=HTMLResponse, name="agent_day_view"
+)
+async def agent_day_view(request: Request, date_str: str, db: Session = Depends(get_db)):
+    try:
+        date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return RedirectResponse(url=str(request.url_for("agent_result")), status_code=303)
+
+    if request.method == "POST":
+        form = await request.form()
+
+        if "add_custom_task" in form:
+            name = form.get("custom_name")
+            time = form.get("custom_time")
+            if name:
+                ct = CustomTask(date=date_obj, name=name, time=time)
+                db.add(ct)
+                db.commit()
+                flash(request, "カスタムタスクを追加しました。")
+            return RedirectResponse(
+                url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
+            )
+
+        if "save_log" in form:
+            content = form.get("day_log_content")
+            dlog = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
+            if not dlog:
+                dlog = DayLog(date=date_obj)
+                db.add(dlog)
+            dlog.content = content
+            db.commit()
+            flash(request, "日報を保存しました。")
+            return RedirectResponse(
+                url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
+            )
+
+        if "delete_custom_task" in form:
+            task_id = form.get("delete_custom_task")
+            task = db.get(CustomTask, int(task_id)) if task_id else None
+            if task:
+                db.delete(task)
+                db.commit()
+                flash(request, "タスクを削除しました。")
+            return RedirectResponse(
+                url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
+            )
+
+        routines = get_weekday_routines(db, date_obj.weekday())
+        all_steps = []
+        for r in routines:
+            all_steps.extend(r.steps)
+
+        for step in all_steps:
+            done_key = f"done_{step.id}"
+            memo_key = f"memo_{step.id}"
+            is_done = form.get(done_key) == "on"
+            memo_text = form.get(memo_key, "")
+
+            log = db.exec(
+                select(DailyLog).where(DailyLog.date == date_obj, DailyLog.step_id == step.id)
+            ).first()
+            if not log:
+                log = DailyLog(date=date_obj, step_id=step.id)
+                db.add(log)
+
+            log.done = is_done
+            log.memo = memo_text
+
+        custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
+        for task in custom_tasks:
+            done_key = f"custom_done_{task.id}"
+            memo_key = f"custom_memo_{task.id}"
+            is_done = form.get(done_key) == "on"
+            memo_text = form.get(memo_key, "")
+            task.done = is_done
+            task.memo = memo_text
+
+        db.commit()
+        flash(request, "進捗を保存しました。")
+        return RedirectResponse(
+            url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
+        )
+
+    timeline_items, completion_rate = _get_timeline_data(db, date_obj)
+    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
+    routines = get_weekday_routines(db, date_obj.weekday())
+
+    return template_response(
+        request,
+        "agent_day.html",
+        {
+            "date": date_obj,
+            "timeline_items": timeline_items,
+            "day_log": day_log,
+            "completion_rate": completion_rate,
+            "routines": routines,
+        },
     )
 
 
