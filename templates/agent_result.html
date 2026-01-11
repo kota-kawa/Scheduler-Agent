@@ -16,13 +16,42 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         /* Standalone adjustments to match the 'right side' look without the sidebar */
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
         body {
             background-color: #f8fafc; /* Match .app-shell or main background if needed */
+            overflow: auto;
         }
         .standalone-container {
             padding: 2rem;
             max-width: 1400px;
             margin: 0 auto;
+            min-height: 100%;
+        }
+        .iframe-hosted .standalone-container {
+            max-width: 100%;
+            padding: 1.25rem;
+        }
+        .iframe-hosted .calendar-grid,
+        .iframe-hosted .calendar-header {
+            gap: 0.75rem;
+        }
+        @media (max-width: 1100px) {
+            .calendar-grid,
+            .calendar-header {
+                gap: 0.5rem;
+            }
+            .calendar-day {
+                min-height: 96px;
+                padding: 0.75rem;
+            }
         }
     </style>
 </head>
@@ -88,6 +117,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        if (window.self !== window.top) {
+            document.body.classList.add("iframe-hosted");
+        }
         const $ = (sel, parent = document) => parent.querySelector(sel);
         
         const proxyPrefixMeta = document.querySelector("meta[name='proxy-prefix']");

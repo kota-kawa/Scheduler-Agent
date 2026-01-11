@@ -3,7 +3,7 @@ import datetime
 import json
 import os
 import threading
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, Iterator, List, Union
 
 from dateutil import parser as date_parser
@@ -193,7 +193,23 @@ def pop_flashed_messages(request: Request) -> List[str]:
 def template_response(request: Request, template_name: str, context: Dict[str, Any]) -> HTMLResponse:
     payload = dict(context)
     payload.setdefault("request", request)
-    payload.setdefault("proxy_prefix", request.scope.get("root_path", ""))
+
+    forwarded_prefix = (request.headers.get("x-forwarded-prefix") or "").strip()
+    if "," in forwarded_prefix:
+        forwarded_prefix = forwarded_prefix.split(",", 1)[0].strip()
+    proxy_prefix = forwarded_prefix or request.scope.get("root_path", "")
+    if proxy_prefix and not proxy_prefix.startswith("/"):
+        proxy_prefix = f"/{proxy_prefix}"
+    proxy_prefix = proxy_prefix.rstrip("/") if proxy_prefix not in {"", "/"} else ""
+
+    payload.setdefault("proxy_prefix", proxy_prefix)
+
+    def _apply_proxy_prefix(path: str) -> str:
+        if not proxy_prefix:
+            return path
+        if path.startswith(proxy_prefix):
+            return path
+        return f"{proxy_prefix}{path}"
 
     def _url_for(endpoint: str, **values: Any) -> str:
         param_names: set[str] = set()
@@ -203,15 +219,23 @@ def template_response(request: Request, template_name: str, context: Dict[str, A
                 break
         if values and not param_names:
             try:
-                return str(request.url_for(endpoint, **values))
+                raw_url = str(request.url_for(endpoint, **values))
+                parsed = urlparse(raw_url)
+                path = parsed.path or "/"
+                query = parsed.query
+                path = _apply_proxy_prefix(path)
+                return f"{path}?{query}" if query else path
             except Exception:
                 pass
         path_params = {k: v for k, v in values.items() if k in param_names}
         query_params = {k: v for k, v in values.items() if k not in param_names}
-        url = request.url_for(endpoint, **path_params)
+        raw_url = str(request.url_for(endpoint, **path_params))
+        parsed = urlparse(raw_url)
+        path = parsed.path or "/"
+        path = _apply_proxy_prefix(path)
         if query_params:
-            url = f"{url}?{urlencode(query_params)}"
-        return str(url)
+            return f"{path}?{urlencode(query_params)}"
+        return path
 
     payload.setdefault("url_for", _url_for)
     payload.setdefault("get_flashed_messages", lambda: pop_flashed_messages(request))
