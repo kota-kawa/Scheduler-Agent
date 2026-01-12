@@ -1,8 +1,13 @@
 import os
 import pytest
+import sqlmodel
 from sqlmodel import create_engine, SQLModel
 from sqlmodel.pool import StaticPool
 from fastapi.testclient import TestClient
+
+
+if getattr(sqlmodel, "__stub__", False):
+    pytest.skip("sqlmodel is not installed; skipping DB-backed tests.", allow_module_level=True)
 
 # Set env before importing app (though we will monkeypatch anyway)
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"

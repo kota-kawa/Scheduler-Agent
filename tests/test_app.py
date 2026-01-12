@@ -5,6 +5,11 @@ import sys
 
 import pytest
 from sqlmodel import select
+import sqlmodel
+
+
+if getattr(sqlmodel, "__stub__", False):
+    pytest.skip("sqlmodel is not installed; skipping DB-backed tests.", allow_module_level=True)
 
 
 def _load_app():

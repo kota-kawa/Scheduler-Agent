@@ -28,15 +28,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from llm_client import (
     UnifiedClient,
-    _claude_messages_from_openai,
     _content_to_text,
-    _extract_actions_from_claude_blocks,
-    _extract_actions_from_tool_calls,
-    _merge_dict,
     call_scheduler_llm,
 )
 from model_selection import apply_model_selection, current_available_models, update_override
-from scheduler_tools import REVIEW_TOOLS
 
 load_dotenv("secrets.env")
 
@@ -384,139 +379,6 @@ def _build_scheduler_context(db: Session, today: datetime.date | None = None) ->
         *(recent_day_logs or ["(none)"]),
     ]
     return "\n".join(context_parts)
-
-
-def _format_history_for_prompt(history_messages: List[Dict[str, str]]) -> str:
-    lines = []
-    for entry in history_messages:
-        role = entry.get("role")
-        content = entry.get("content")
-        if not isinstance(role, str) or not isinstance(content, str):
-            continue
-        lines.append(f"{role}: {content.strip()}")
-    return "\n".join(lines) or "会話ログは空でした。"
-
-
-def _normalise_history_messages(raw_history: Any) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = []
-    if not isinstance(raw_history, list):
-        return messages
-
-    for entry in raw_history:
-        if not isinstance(entry, dict):
-            continue
-        role = str(entry.get("role") or "").strip().lower()
-        content = entry.get("content")
-        if role not in {"user", "assistant", "system"}:
-            continue
-        if not isinstance(content, str):
-            continue
-        messages.append({"role": role, "content": content})
-    return messages
-
-
-def _call_conversation_review(messages: List[Dict[str, str]], context: str) -> Dict[str, Any]:
-    client = UnifiedClient()
-    provider = client.provider
-    model_name = client.model_name
-    now = datetime.datetime.now().astimezone()
-    now_text = now.strftime("%Y-%m-%d %H:%M:%S %Z")
-    now_iso = now.isoformat(timespec="seconds")
-    history_text = _format_history_for_prompt(messages)
-
-    system_prompt = (
-        f"現在日時: {now_text} / {now_iso}\n"
-        "あなたは「スケジュール・タスク管理専門」のアシスタントです。\n\n"
-        "【用語の定義】\n"
-        "- 「予定」「スケジュール」→ カスタムタスク (Custom Task)\n"
-        "- 「記録」「メモ」→ 日報 (Daily Log)\n\n"
-        "【あなたの専門分野（発言可能な範囲）】\n"
-        "- 予定管理: 予定の追加・変更・削除・確認\n"
-        "- タスク管理: ToDoリスト、タスクの進捗管理\n"
-        "- 日報・活動記録: 日々の活動ログ、達成事項の記録\n"
-        "- リマインダー: 時間ベースの通知設定\n\n"
-        "【発言してはいけない場合】\n"
-        "- Web検索・ブラウザ操作 → Browser Agentの専門\n"
-        "- IoTデバイス操作 → IoT Agentの専門\n"
-        "- 料理・洗濯・家庭科の知識 → Life-Style Agentの専門\n"
-        "- スケジュール/タスクと無関係な話題\n\n"
-        "【判断ルール】\n"
-        "1.  ツール呼び出しは、予定・タスク・日報の操作が「明示的に」必要な場合のみ\n"
-        "2. 会話中に日時・予定・タスクのキーワードがあっても、操作依頼でなければ発言しない\n"
-        "3. 単なる確認・アドバイスでは発言しない\n\n"
-        "【発言する例】\n"
-        "- 「明日の予定を追加して」→ ツール呼び出し\n"
-        "- 「今週のタスクを確認して」→ 発言する\n\n"
-        "【発言しない例】\n"
-        "- 「明日は暑いらしい」→ 発言しない（天気の話題）\n"
-        "- 「夕食のレシピ」→ 発言しない\n"
-    )
-
-    prompt_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "system", "content": context},
-        {"role": "user", "content": f"会話ログ:\n{history_text}\n必要があればツールを使って自動対応してください。"},
-    ]
-
-    reply_text = ""
-    actions: List[Dict[str, Any]] = []
-    decision: Dict[str, Any] = {}
-
-    if provider == "claude":
-        system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
-        response = client.client.messages.create(
-            model=model_name,
-            system=system_text,
-            messages=claude_messages,
-            temperature=0.2,
-            max_tokens=800,
-            tools=REVIEW_TOOLS,
-            tool_choice={"type": "auto"},
-        )
-        reply_text, actions, decision = _extract_actions_from_claude_blocks(
-            getattr(response, "content", None)
-        )
-    else:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=prompt_messages,
-            temperature=0.2,
-            max_tokens=800,
-            tools=REVIEW_TOOLS,
-            tool_choice="auto",
-        )
-
-        message = response.choices[0].message if response and getattr(response, "choices", None) else None
-        reply_text = _content_to_text(getattr(message, "content", "")) if message else ""
-        actions, decision = (
-            _extract_actions_from_tool_calls(getattr(message, "tool_calls", []))
-            if message
-            else ([], None)
-        )
-        decision = decision or {}
-
-    resolved = _merge_dict(
-        {
-            "action_required": bool(actions),
-            "should_reply": bool(reply_text),
-            "reply": reply_text.strip(),
-            "notes": "",
-        },
-        decision,
-    )
-
-    if resolved.get("reply"):
-        resolved["should_reply"] = True
-    if actions and not resolved.get("action_required"):
-        resolved["action_required"] = True
-
-    return {
-        "action_required": bool(resolved.get("action_required")),
-        "should_reply": bool(resolved.get("should_reply")),
-        "reply": resolved.get("reply") or "",
-        "actions": actions,
-        "notes": resolved.get("notes") or "",
-    }
 
 
 def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
@@ -1712,93 +1574,6 @@ async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
             {"role": h.role, "content": h.content, "timestamp": h.timestamp.isoformat()}
             for h in history
         ]
-    }
-
-
-@app.post("/api/conversations/review", name="review_conversation_history")
-async def review_conversation_history(request: Request, db: Session = Depends(get_db)):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    raw_history = payload.get("history")
-    if raw_history is None:
-        raw_history = payload.get("messages")
-
-    history_messages = _normalise_history_messages(raw_history)
-    if not history_messages:
-        raise HTTPException(status_code=400, detail="history must be a non-empty array")
-
-    today = datetime.date.today()
-    context = _build_scheduler_context(db, today)
-
-    try:
-        review = _call_conversation_review(history_messages, context)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"会話履歴の分析に失敗しました: {exc}")
-
-    actions = review.get("actions") if isinstance(review.get("actions"), list) else []
-    results, errors, modified_ids = _apply_actions(db, actions, today)
-    action_taken = bool(results)
-
-    base_reply = review.get("reply") if isinstance(review.get("reply"), str) else ""
-
-    if results or errors:
-        summary_client = UnifiedClient()
-        result_text = ""
-        if results:
-            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
-        if errors:
-            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
-
-        summary_system_prompt = (
-            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
-            "会話の流れとシステムのアクション実行結果をもとに、ユーザーへの最終的な回答を作成してください。\n"
-            "\n"
-            "## ガイドライン\n"
-            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨など）を使用し、丁寧語（です・ます）で話してください。\n"
-            "2. **分かりやすく**: 実行結果を自然な文章に統合してください。\n"
-            "3. **エラーへの対応**: エラーは優しく伝えてください。\n"
-        )
-
-        last_user_msg = "（会話履歴からの自動対応）"
-        if history_messages and history_messages[-1]["role"] == "user":
-            last_user_msg = history_messages[-1]["content"]
-
-        summary_messages = [
-            {"role": "system", "content": summary_system_prompt},
-            {
-                "role": "user",
-                "content": f"直近のユーザー発言: {last_user_msg}\n\n{result_text}\n\n元のアシスタントの応答案: {base_reply}",
-            },
-        ]
-
-        try:
-            resp = summary_client.create(messages=summary_messages, temperature=0.7, max_tokens=1000)
-            final_reply = _content_to_text(resp.choices[0].message.content)
-        except Exception:
-            reply_parts = []
-            if base_reply:
-                reply_parts.append(base_reply)
-            if results:
-                reply_parts.append("実行結果:\n" + "\n".join(f"- {item}" for item in results))
-            if errors:
-                reply_parts.append("エラー:\n" + "\n".join(f"- {err}" for err in errors))
-            final_reply = "\n\n".join(reply_parts)
-    else:
-        final_reply = base_reply
-
-    return {
-        "action_required": bool(review.get("action_required") or actions),
-        "action_taken": action_taken,
-        "actions": actions,
-        "results": [],
-        "_original_results": results,
-        "errors": errors,
-        "modified_ids": modified_ids,
-        "should_reply": bool(review.get("should_reply") or final_reply),
-        "reply": final_reply,
-        "notes": review.get("notes") if isinstance(review.get("notes"), str) else "",
     }
 
 
