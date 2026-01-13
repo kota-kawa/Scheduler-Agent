@@ -1,5 +1,7 @@
 # Scheduler Agent 📅
 
+[English](README_en.md)
+
 <img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
 
 ## 👋 はじめに
