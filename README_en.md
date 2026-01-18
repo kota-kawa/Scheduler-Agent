@@ -126,4 +126,4 @@ Once started, access [http://localhost:5000](http://localhost:5000).
 ## 📜 License
 
 This project is released under the [MIT License](LICENSE.md).
-Feel free to modify it and create your own strongest assistant! 🛠️
+Individuals and companies are free to download, customize, and use it as they see fit! 🛠️
