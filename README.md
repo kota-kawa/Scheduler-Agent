@@ -87,6 +87,16 @@ PostgreSQLというデータベースが必要です。
 DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler
 ```
 
+#### 旧SQLiteデータの移行（必要な場合のみ）
+現在はPostgreSQLのみ対応です。既存の `instance/scheduler.db` を移行する場合は、以下を実行してください。
+
+```bash
+DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler \\
+  python scripts/migrate_sqlite_to_postgres.py
+```
+
+既にPostgreSQL側にデータがある場合は `--force` を付けて上書きできます。
+
 ### 4. ▶️ スタート
 さあ、起動しましょう！
 

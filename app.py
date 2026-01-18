@@ -47,12 +47,8 @@ def _build_engine(database_url: str):
     normalized_url = database_url
     if normalized_url.startswith("postgres://"):
         normalized_url = normalized_url.replace("postgres://", "postgresql+psycopg2://", 1)
-
-    connect_args: Dict[str, Any] = {}
-    if normalized_url.startswith("sqlite"):
-        connect_args["check_same_thread"] = False
-    if connect_args:
-        return create_engine(normalized_url, connect_args=connect_args)
+    if not normalized_url.startswith("postgresql"):
+        raise ValueError("DATABASE_URL must be PostgreSQL (postgresql+psycopg2://...).")
     return create_engine(normalized_url)
 
 

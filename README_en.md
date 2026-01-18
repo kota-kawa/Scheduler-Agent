@@ -87,6 +87,16 @@ Run it locally and write the connection information in `secrets.env`.
 DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler
 ```
 
+#### Legacy SQLite migration (optional)
+The app now targets PostgreSQL only. If you already have `instance/scheduler.db`, run:
+
+```bash
+DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler \\
+  python scripts/migrate_sqlite_to_postgres.py
+```
+
+Use `--force` to truncate the PostgreSQL tables before import.
+
 ### 4. ▶️ Start
 Let's start it up!
 
