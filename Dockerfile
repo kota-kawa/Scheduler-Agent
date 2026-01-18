@@ -1,3 +1,13 @@
+FROM node:20-alpine AS frontend
+
+WORKDIR /app
+
+COPY package*.json vite.config.js ./
+COPY frontend ./frontend
+
+RUN npm install
+RUN npm run build
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -20,9 +30,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Copy application code
 COPY . .
 
+# Copy built frontend assets
+COPY --from=frontend /app/static/spa ./static/spa
+
 # Expose port
 EXPOSE 5010
 
 # Run application using the virtual environment
 CMD ["uvicorn", "asgi:app", "--host", "0.0.0.0", "--port", "5010"]
-

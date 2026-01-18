@@ -97,7 +97,23 @@ DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler \\
 
 Use `--force` to truncate the PostgreSQL tables before import.
 
-### 4. ▶️ Start
+### 4. 🎨 Frontend (Vite)
+The frontend is built with Vite. Node.js is required.
+
+```bash
+npm install
+npm run build
+```
+
+For hot reload during development, start the Vite dev server in another terminal (API is proxied to port 5000).
+
+```bash
+npm run dev
+```
+
+The Vite dev server is available at [http://localhost:5173](http://localhost:5173).
+
+### 5. ▶️ Start
 Let's start it up!
 
 ```bash

@@ -64,7 +64,7 @@
 -   The LLM is expected to emit tool calls (e.g., `create_custom_task`, `toggle_step`) and a natural-language `reply` alongside them—no custom JSON parsing required.
 
 ### Frontend
--   **`static/scheduler.js`:** Handles the chat interface, sending messages to `/api/chat`, and fetching/updating model settings via `/api/models` and `/model_settings`.
+-   **`frontend/src/main.jsx`:** Handles the chat interface, sending messages to `/api/chat`, and fetching/updating model settings via `/api/models` and `/model_settings`.
 -   **`templates/`:** Standard Jinja2 templates extending `layout.html`.
 
 ### Database

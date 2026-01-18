@@ -97,7 +97,23 @@ DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler \\
 
 既にPostgreSQL側にデータがある場合は `--force` を付けて上書きできます。
 
-### 4. ▶️ スタート
+### 4. 🎨 フロントエンド（Vite）
+フロントエンドは Vite でビルドします。Node.js が必要です。
+
+```bash
+npm install
+npm run build
+```
+
+開発時にホットリロードを使う場合は、別ターミナルで以下を起動してください（API は 5000 にプロキシされます）。
+
+```bash
+npm run dev
+```
+
+Vite 開発サーバーは [http://localhost:5173](http://localhost:5173) で確認できます。
+
+### 5. ▶️ スタート
 さあ、起動しましょう！
 
 ```bash

@@ -36,9 +36,8 @@ def test_layout_contains_react_root_and_scripts(client):
     body = response.text
     assert 'id="app-root"' in body
     assert 'data-page="index"' in body
-    assert "react.production.min.js" in body
-    assert "react-dom.production.min.js" in body
-    assert "scheduler.js" in body
+    assert "spa/app.css" in body
+    assert "spa/app.js" in body
 
 
 def test_calendar_api_basic(client):

@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `app.py` hosts the FastAPI app, SQLAlchemy models (Routine, Step, DailyLog, CustomTask, DayLog), HTML routes, and JSON endpoints used by the chat UI.
 - LLM integration and model routing live in `llm_client.py` and `model_selection.py`; these read provider/API key overrides from environment variables or `model_settings.json` (via `MULTI_AGENT_SETTINGS_PATH`).
-- UI assets sit in `templates/` (Jinja templates) and `static/` (`scheduler.js`, `style.css`). Database access is via PostgreSQL configured through `DATABASE_URL`.
+- UI assets sit in `templates/` (Jinja templates), `frontend/src/` (React source), and `static/spa/` (Vite build output). Database access is via PostgreSQL configured through `DATABASE_URL`.
 - Container entrypoints are defined by `Dockerfile` and `docker-compose.yml` (service `web`).
 
 ## Build, Test, and Development Commands
@@ -15,7 +15,7 @@
 ## Coding Style & Naming Conventions
 - Python: follow PEP 8 with 4-space indent, snake_case functions, PascalCase models, and type hints where practical (see `llm_client.py`). Keep helpers small and log-friendly errors.
 - Templates: prefer extending `templates/layout.html` and keep logic minimal inside Jinja blocks.
-- JavaScript: camelCase utilities, keep fetch error handling consistent with `static/scheduler.js`; avoid inline script tags when adding new interactions.
+- JavaScript/React: camelCase utilities, keep fetch error handling consistent with `frontend/src/main.jsx`; avoid inline script tags when adding new interactions.
 
 ## Testing Guidelines
 - There is no automated suite yet; before opening a PR, run the dev server and exercise: calendar navigation, routine/step CRUD, custom task toggles, chat responses, and model selector updates.

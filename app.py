@@ -900,142 +900,12 @@ def api_calendar(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/", response_class=HTMLResponse, name="index")
 def index(request: Request, db: Session = Depends(get_db)):
-    today = datetime.date.today()
-    year = int(request.query_params.get("year", today.year))
-    month = int(request.query_params.get("month", today.month))
-
-    if month > 12:
-        month = 1
-        year += 1
-    elif month < 1:
-        month = 12
-        year -= 1
-
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdatescalendar(year, month)
-
-    calendar_data = []
-    for week in month_days:
-        week_data = []
-        for day in week:
-            is_current_month = day.month == month
-
-            weekday = day.weekday()
-            routines = get_weekday_routines(db, weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            color_class = "bg-light"
-            if total_steps > 0:
-                ratio = completed_count / total_steps
-                if ratio == 1.0:
-                    color_class = "bg-success text-white"
-                elif ratio > 0.5:
-                    color_class = "bg-warning"
-                elif ratio > 0:
-                    color_class = "bg-info text-white"
-
-            week_data.append(
-                {
-                    "date": day,
-                    "day_num": day.day,
-                    "is_current_month": is_current_month,
-                    "total_routines": len(routines) + len(custom_tasks),
-                    "total_steps": total_steps,
-                    "completed_steps": completed_count,
-                    "color_class": color_class,
-                    "has_day_log": has_day_log,
-                }
-            )
-        calendar_data.append(week_data)
-
-    return template_response(
-        request,
-        "index.html",
-        {"calendar_data": calendar_data, "year": year, "month": month, "today": today},
-    )
+    return template_response(request, "spa.html", {"page_id": "index"})
 
 
 @app.get("/agent-result", response_class=HTMLResponse, name="agent_result")
 def agent_result(request: Request, db: Session = Depends(get_db)):
-    today = datetime.date.today()
-    year = int(request.query_params.get("year", today.year))
-    month = int(request.query_params.get("month", today.month))
-
-    if month > 12:
-        month = 1
-        year += 1
-    elif month < 1:
-        month = 12
-        year -= 1
-
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdatescalendar(year, month)
-
-    calendar_data = []
-    for week in month_days:
-        week_data = []
-        for day in week:
-            is_current_month = day.month == month
-
-            weekday = day.weekday()
-            routines = get_weekday_routines(db, weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            color_class = "bg-light"
-            if total_steps > 0:
-                ratio = completed_count / total_steps
-                if ratio == 1.0:
-                    color_class = "bg-success text-white"
-                elif ratio > 0.5:
-                    color_class = "bg-warning"
-                elif ratio > 0:
-                    color_class = "bg-info text-white"
-
-            week_data.append(
-                {
-                    "date": day,
-                    "day_num": day.day,
-                    "is_current_month": is_current_month,
-                    "total_routines": len(routines) + len(custom_tasks),
-                    "total_steps": total_steps,
-                    "completed_steps": completed_count,
-                    "color_class": color_class,
-                    "has_day_log": has_day_log,
-                }
-            )
-        calendar_data.append(week_data)
-
-    return template_response(
-        request,
-        "agent_result.html",
-        {
-            "calendar_data": calendar_data,
-            "year": year,
-            "month": month,
-            "today": today,
-            "day_view_endpoint": "agent_day_view",
-        },
-    )
+    return template_response(request, "spa.html", {"page_id": "agent-result"})
 
 
 @app.api_route(
@@ -1122,141 +992,12 @@ async def agent_day_view(request: Request, date_str: str, db: Session = Depends(
             url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
         )
 
-    timeline_items, completion_rate = _get_timeline_data(db, date_obj)
-    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
-    routines = get_weekday_routines(db, date_obj.weekday())
-
-    return template_response(
-        request,
-        "agent_day.html",
-        {
-            "date": date_obj,
-            "timeline_items": timeline_items,
-            "day_log": day_log,
-            "completion_rate": completion_rate,
-            "routines": routines,
-        },
-    )
-
-
-@app.get("/calendar_partial", response_class=HTMLResponse, name="calendar_partial")
-def calendar_partial(request: Request, db: Session = Depends(get_db)):
-    today = datetime.date.today()
-    year = int(request.query_params.get("year", today.year))
-    month = int(request.query_params.get("month", today.month))
-
-    if month > 12:
-        month = 1
-        year += 1
-    elif month < 1:
-        month = 12
-        year -= 1
-
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdatescalendar(year, month)
-
-    calendar_data = []
-    for week in month_days:
-        week_data = []
-        for day in week:
-            is_current_month = day.month == month
-
-            weekday = day.weekday()
-            routines = get_weekday_routines(db, weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            week_data.append(
-                {
-                    "date": day,
-                    "day_num": day.day,
-                    "is_current_month": is_current_month,
-                    "total_routines": len(routines) + len(custom_tasks),
-                    "total_steps": total_steps,
-                    "completed_steps": completed_count,
-                    "has_day_log": has_day_log,
-                }
-            )
-        calendar_data.append(week_data)
-
-    return template_response(
-        request, "calendar_partial.html", {"calendar_data": calendar_data, "today": today}
-    )
+    return template_response(request, "spa.html", {"page_id": "agent-day"})
 
 
 @app.get("/embed/calendar", response_class=HTMLResponse, name="embed_calendar")
 def embed_calendar(request: Request, db: Session = Depends(get_db)):
-    today = datetime.date.today()
-    year = int(request.query_params.get("year", today.year))
-    month = int(request.query_params.get("month", today.month))
-
-    if month > 12:
-        month = 1
-        year += 1
-    elif month < 1:
-        month = 12
-        year -= 1
-
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdatescalendar(year, month)
-
-    calendar_data = []
-    for week in month_days:
-        week_data = []
-        for day in week:
-            is_current_month = day.month == month
-            weekday = day.weekday()
-            routines = get_weekday_routines(db, weekday)
-            total_steps = sum(len(r.steps) for r in routines)
-
-            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
-            completed_count = sum(1 for l in logs if l.done)
-
-            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
-            total_steps += len(custom_tasks)
-            completed_count += sum(1 for t in custom_tasks if t.done)
-
-            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
-            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
-
-            color_class = "bg-light"
-            if total_steps > 0:
-                ratio = completed_count / total_steps
-                if ratio == 1.0:
-                    color_class = "bg-success text-white"
-                elif ratio > 0.5:
-                    color_class = "bg-warning"
-                elif ratio > 0:
-                    color_class = "bg-info text-white"
-
-            week_data.append(
-                {
-                    "date": day,
-                    "day_num": day.day,
-                    "is_current_month": is_current_month,
-                    "total_routines": len(routines) + len(custom_tasks),
-                    "total_steps": total_steps,
-                    "completed_steps": completed_count,
-                    "color_class": color_class,
-                    "has_day_log": has_day_log,
-                }
-            )
-        calendar_data.append(week_data)
-
-    return template_response(
-        request,
-        "embed_calendar.html",
-        {"calendar_data": calendar_data, "year": year, "month": month, "today": today},
-    )
+    return template_response(request, "spa.html", {"page_id": "embed-calendar"})
 
 
 @app.get("/api/day/{date_str}", name="api_day_view")
@@ -1461,48 +1202,7 @@ async def day_view(request: Request, date_str: str, db: Session = Depends(get_db
             url=str(request.url_for("day_view", date_str=date_str)), status_code=303
         )
 
-    timeline_items, completion_rate = _get_timeline_data(db, date_obj)
-    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
-    routines = get_weekday_routines(db, date_obj.weekday())
-
-    return template_response(
-        request,
-        "day.html",
-        {
-            "date": date_obj,
-            "timeline_items": timeline_items,
-            "day_log": day_log,
-            "completion_rate": completion_rate,
-            "routines": routines,
-        },
-    )
-
-
-@app.get("/day/{date_str}/timeline", response_class=HTMLResponse, name="day_view_timeline")
-def day_view_timeline(request: Request, date_str: str, db: Session = Depends(get_db)):
-    try:
-        date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid Date")
-
-    timeline_items, completion_rate = _get_timeline_data(db, date_obj)
-
-    return template_response(
-        request,
-        "timeline_partial.html",
-        {"date": date_obj, "timeline_items": timeline_items, "completion_rate": completion_rate},
-    )
-
-
-@app.get("/day/{date_str}/log_partial", response_class=HTMLResponse, name="day_view_log_partial")
-def day_view_log_partial(request: Request, date_str: str, db: Session = Depends(get_db)):
-    try:
-        date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid Date")
-
-    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
-    return template_response(request, "log_partial.html", {"day_log": day_log})
+    return template_response(request, "spa.html", {"page_id": "day"})
 
 
 @app.get("/api/routines/day/{weekday}", name="api_routines_by_day")
@@ -1537,8 +1237,7 @@ def api_routines(db: Session = Depends(get_db)):
 
 @app.get("/routines", response_class=HTMLResponse, name="routines_list")
 def routines_list(request: Request, db: Session = Depends(get_db)):
-    routines = db.exec(select(Routine)).all()
-    return template_response(request, "routines.html", {"routines": routines})
+    return template_response(request, "spa.html", {"page_id": "routines"})
 
 
 @app.post("/routines/add", name="add_routine")
@@ -1753,7 +1452,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/evaluation", response_class=HTMLResponse, name="evaluation_page")
 def evaluation_page(request: Request):
-    return template_response(request, "evaluation.html", {})
+    return template_response(request, "spa.html", {"page_id": "evaluation"})
 
 
 @app.post("/api/evaluation/chat", name="evaluation_chat")

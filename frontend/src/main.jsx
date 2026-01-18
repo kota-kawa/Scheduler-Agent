@@ -1,7 +1,11 @@
 /* Scheduler Agent UI (full React render) */
 
-const { createElement: h, Fragment, useEffect, useMemo, useRef, useState } = React;
-const { createRoot, flushSync } = ReactDOM;
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
+import "./style.css";
+
+const { createElement: h } = React;
 
 const nowTime = () => {
   const d = new Date();

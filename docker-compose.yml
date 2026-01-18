@@ -23,8 +23,6 @@ services:
       - "5010:5010"
     environment:
       DATABASE_URL: postgresql+psycopg2://scheduler:scheduler@db:5432/scheduler
-    volumes:
-      - .:/app
     restart: unless-stopped
     depends_on:
       db:

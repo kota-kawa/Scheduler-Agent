@@ -131,3 +131,5 @@ Thumbs.db
 secrets.env
 *.db
 *.Identifier
+node_modules/
+static/spa/
