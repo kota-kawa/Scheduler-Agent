@@ -32,13 +32,16 @@ client = TestClient(app_module.app)
 def test_agent_result_endpoint():
     response = client.get("/agent-result")
     assert response.status_code == 200
-    assert "Agent Result - Calendar" in response.text
-    assert "calendar-grid" in response.text
-    assert "agent-result" in response.text
+    body = response.text
+    assert "Agent Result - Calendar" in body
+    assert 'id="app-root"' in body
+    assert 'data-page="agent-result"' in body
 
 def test_agent_day_view_endpoint():
     # Use a dummy date
     response = client.get("/agent-result/day/2023-01-01")
     assert response.status_code == 200
-    assert "Agent Result - Day View" in response.text
-    assert "timeline" in response.text.lower()
+    body = response.text
+    assert "Agent Result - Day View" in body
+    assert 'id="app-root"' in body
+    assert 'data-page="agent-day"' in body

@@ -185,6 +185,11 @@ def pop_flashed_messages(request: Request) -> List[str]:
     return request.session.pop("_flashes", [])
 
 
+@app.get("/api/flash", name="api_flash")
+def api_flash(request: Request):
+    return {"messages": pop_flashed_messages(request)}
+
+
 def template_response(request: Request, template_name: str, context: Dict[str, Any]) -> HTMLResponse:
     payload = dict(context)
     payload.setdefault("request", request)
@@ -1312,9 +1317,69 @@ def api_day_view(date_str: str, db: Session = Depends(get_db)):
 
     return {
         "date": date_obj.isoformat(),
+        "weekday": date_obj.weekday(),
+        "day_name": date_obj.strftime("%A"),
+        "date_display": date_obj.strftime("%Y.%m.%d"),
         "timeline_items": serialized_timeline_items,
         "completion_rate": completion_rate,
         "day_log_content": day_log.content if day_log else None,
+    }
+
+
+@app.get("/api/calendar", name="api_calendar")
+def api_calendar(request: Request, db: Session = Depends(get_db)):
+    today = datetime.date.today()
+    year = int(request.query_params.get("year", today.year))
+    month = int(request.query_params.get("month", today.month))
+
+    if month > 12:
+        month = 1
+        year += 1
+    elif month < 1:
+        month = 12
+        year -= 1
+
+    cal = calendar.Calendar(firstweekday=0)
+    month_days = cal.monthdatescalendar(year, month)
+
+    calendar_data = []
+    for week in month_days:
+        week_data = []
+        for day in week:
+            is_current_month = day.month == month
+
+            weekday = day.weekday()
+            routines = get_weekday_routines(db, weekday)
+            total_steps = sum(len(r.steps) for r in routines)
+
+            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
+            completed_count = sum(1 for l in logs if l.done)
+
+            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
+            total_steps += len(custom_tasks)
+            completed_count += sum(1 for t in custom_tasks if t.done)
+
+            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
+            has_day_log = bool(day_log and day_log.content and day_log.content.strip())
+
+            week_data.append(
+                {
+                    "date": day.isoformat(),
+                    "day_num": day.day,
+                    "is_current_month": is_current_month,
+                    "total_routines": len(routines) + len(custom_tasks),
+                    "total_steps": total_steps,
+                    "completed_steps": completed_count,
+                    "has_day_log": has_day_log,
+                }
+            )
+        calendar_data.append(week_data)
+
+    return {
+        "calendar_data": calendar_data,
+        "year": year,
+        "month": month,
+        "today": today.isoformat(),
     }
 
 

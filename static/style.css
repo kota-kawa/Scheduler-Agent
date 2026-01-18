@@ -229,6 +229,75 @@ h1, h2, h3, h4, h5, h6 {
     border-color: var(--primary-color);
 }
 
+/* Standalone / Embed layouts */
+body[data-page="agent-result"],
+body[data-page="agent-day"] {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #f8fafc;
+    overflow: auto;
+}
+
+body[data-page="embed-calendar"] {
+    background-color: #f8fafc;
+    padding: 16px;
+    font-family: "Noto Sans JP", sans-serif;
+}
+
+.standalone-container {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: 100%;
+}
+
+body[data-page="agent-day"] .standalone-container {
+    max-width: 1000px;
+}
+
+.iframe-hosted .standalone-container {
+    max-width: 100%;
+    padding: 1.25rem;
+}
+
+.iframe-hosted .calendar-grid,
+.iframe-hosted .calendar-header {
+    gap: 0.75rem;
+}
+
+@media (max-width: 1100px) {
+    .calendar-grid,
+    .calendar-header {
+        gap: 0.5rem;
+    }
+    .calendar-day {
+        min-height: 96px;
+        padding: 0.75rem;
+    }
+}
+
+.embed-shell {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.embed-header {
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    margin-bottom: 12px;
+}
+
+.calendar-wrapper {
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
 /* Badges */
 .badge {
     padding: 0.5em 0.8em;
