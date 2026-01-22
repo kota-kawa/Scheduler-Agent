@@ -23,8 +23,10 @@ services:
     init: true
     ports:
       - "5010:5010"
+    env_file:
+      - secrets.env
     environment:
-      DATABASE_URL: postgresql+psycopg2://scheduler:scheduler@db:5432/scheduler
+      DATABASE_URL: postgresql+psycopg2://scheduler:${POSTGRES_PASSWORD}@db:5432/scheduler
     restart: unless-stopped
     depends_on:
       db:
