@@ -2,10 +2,12 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
+    env_file:
+      - secrets.env
     environment:
       POSTGRES_DB: scheduler
       POSTGRES_USER: scheduler
-      POSTGRES_PASSWORD: scheduler
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

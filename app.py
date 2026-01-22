@@ -137,7 +137,11 @@ class EvaluationResult(SQLModel, table=True):
 
 app = FastAPI(root_path=os.getenv("PROXY_PREFIX", ""))
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "devkey"))
+
+if not os.getenv("SESSION_SECRET"):
+    raise ValueError("SESSION_SECRET environment variable is not set. Please set it in secrets.env.")
+
+app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"])
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
