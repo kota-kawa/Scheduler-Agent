@@ -1,129 +1,97 @@
 # Scheduler Agent 📅
 
-[English](README_en.md)
-
 <img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
 
-## 👋 はじめに
+## Welcome
 
-**Scheduler-Agent** へようこそ！
-これは、あなたの毎日をちょっと便利にする、AI搭載のスケジュール管理アシスタントです。
-
-「明日の予定は？」「来週の火曜日に買い物リストを追加して」
-そんな風にチャットで話しかけるだけで、AIがあなたの代わりにスケジュールを整理してくれます。
-日々のルーチンも、急なタスクも、ひとつのタイムラインで見やすく管理しましょう！✨
-
-## ✨ できること
-
-*   **📅 タイムライン表示**
-    毎日のルーチンと、その日だけのタスクを時系列でスッキリ表示。「今なにをすべきか」がひと目で分かります。
-
-*   **💬 チャットでかんたん操作**
-    難しい操作は不要です。LINEやチャットアプリのように、AIに話しかけるだけで予定の追加や確認ができます。
-
-*   **🤖 賢いAIがお手伝い**
-    OpenAI (GPT) や Google (Gemini)、Anthropic (Claude) など、最新のAIモデルがあなたの秘書になります。気分に合わせてAIを切り替えることも可能です。
+**Scheduler Agent** is an AI-powered scheduling assistant that helps you manage routines and one-off tasks through a simple chat experience. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized.
 
 ---
 
-## 🚀 すぐに始める (推奨)
+## 🚀 Quick start (Docker Compose only)
 
-パソコンに **Docker** が入っていれば、すぐに使い始めることができます。
-
-### 1. 🔑 準備：AIの鍵 (APIキー) をセット
-まずは「AIへのパスポート」である **APIキー** を設定しましょう。
-プロジェクトのフォルダに `secrets.env` という名前のファイルを作り、持っているキーを書き込みます。
+### 1) Prepare your API keys
+Create a file named `secrets.env` in the project root and add at least one provider key.
 
 ```env
-# secrets.env ファイルの中身 (例)
-# 少なくとも1つあればOKです！
-
+# secrets.env (example)
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 2. ▶️ 起動：コマンドをひとつ実行
-ターミナル（黒い画面）で、以下の魔法のコマンドを入力してください。
+### 2) Start the app
+Run Docker Compose from the project root:
 
 ```bash
 docker compose up --build
 ```
 
-### 3. 🌐 アクセス：ブラウザを開く
-しばらくして文字が流れ止まったら、準備完了です！
-以下のリンクをクリックして、アシスタントに会いに行きましょう。
+### 3) Open the app
+Once the logs settle, open the app in your browser:
 
-👉 [http://localhost:5010](http://localhost:5010)
+👉 http://localhost:5010
+
+### 4) Stop the app
+When you’re done, stop the containers:
+
+```bash
+docker compose down
+```
 
 ---
 
-## 🛠️ 開発者向け (ローカル実行)
+## 📜 License
 
-Pythonを使って直接動かしたい方はこちら。
-高速なツール **uv** を使っているので、セットアップも爆速です⚡️
+This project is released under the [MIT License](LICENSE.md).
 
-### 1. 📦 uv のインストール
-まだの方は、こちらからインストール！
+---
 
-```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+<details>
+<summary>日本語版（クリックして開く）</summary>
 
-### 2. 🏗️ 環境をつくる
-コマンド一発で、必要なライブラリを全部揃えます。
+## 👋 はじめに
 
-```bash
-uv sync
-```
+**Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
+「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
 
-### 3. 🗄️ データベースの用意
-PostgreSQLというデータベースが必要です。
-ローカルで動かして、`secrets.env` に接続情報を書いてください。
+---
+
+## 🚀 すぐに始める（Docker Composeのみ）
+
+### 1) APIキーの準備
+プロジェクト直下に `secrets.env` を作成し、少なくとも1つのキーを追加してください。
 
 ```env
-# 例
-DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler
+# secrets.env の例
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-#### 旧SQLiteデータの移行（必要な場合のみ）
-現在はPostgreSQLのみ対応です。既存の `instance/scheduler.db` を移行する場合は、以下を実行してください。
+### 2) 起動
+プロジェクト直下で次のコマンドを実行します。
 
 ```bash
-DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/scheduler \\
-  python scripts/migrate_sqlite_to_postgres.py
+docker compose up --build
 ```
 
-既にPostgreSQL側にデータがある場合は `--force` を付けて上書きできます。
+### 3) ブラウザでアクセス
+ログが落ち着いたら、以下へアクセスしてください。
 
-### 4. 🎨 フロントエンド（Vite）
-フロントエンドは Vite でビルドします。Node.js が必要です。
+👉 http://localhost:5010
+
+### 4) 停止
+終了するときは、次のコマンドで停止します。
 
 ```bash
-npm install
-npm run build
+docker compose down
 ```
-
-開発時にホットリロードを使う場合は、別ターミナルで以下を起動してください（API は 5000 にプロキシされます）。
-
-```bash
-npm run dev
-```
-
-Vite 開発サーバーは [http://localhost:5173](http://localhost:5173) で確認できます。
-
-### 5. ▶️ スタート
-さあ、起動しましょう！
-
-```bash
-uv run uvicorn app:app --reload --port 5000
-```
-起動したら [http://localhost:5000](http://localhost:5000) へアクセスしてください。
 
 ---
 
 ## 📜 ライセンス
 
-このプロジェクトは [MIT License](LICENSE.md) で公開されています。
-個人、企業を問わず、使いたい方は自由にダウンロードして、カスタマイズして活用してください！ 🛠️
+本プロジェクトは [MIT License](LICENSE.md) で公開されています。
+
+</details>
