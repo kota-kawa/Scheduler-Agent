@@ -15,7 +15,7 @@
 ## Coding Style & Naming Conventions
 - Python: follow PEP 8 with 4-space indent, snake_case functions, PascalCase models, and type hints where practical (see `llm_client.py`). Keep helpers small and log-friendly errors.
 - Templates: prefer extending `templates/layout.html` and keep logic minimal inside Jinja blocks.
-- JavaScript/React: camelCase utilities, keep fetch error handling consistent with `frontend/src/main.jsx`; avoid inline script tags when adding new interactions.
+- JavaScript/React: camelCase utilities, keep fetch error handling consistent with `frontend/src/main.tsx`; avoid inline script tags when adding new interactions.
 
 ## Testing Guidelines
 - There is no automated suite yet; before opening a PR, run the dev server and exercise: calendar navigation, routine/step CRUD, custom task toggles, chat responses, and model selector updates.
