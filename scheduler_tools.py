@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 
 def _build_tool(
+    # 日本語: OpenAI形式のツール定義を組み立てる / English: Build OpenAI-compatible tool schema
     name: str,
     description: str,
     properties: Dict[str, Any],
@@ -24,8 +25,10 @@ def _build_tool(
     }
 
 
+# 日本語: レビュー結果ツール名 / English: Tool name for review decision
 REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 
+# 日本語: スケジューラ向けツール一覧 / English: Tool list for scheduler actions
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         "create_custom_task",
@@ -200,6 +203,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
 ]
 
+# 日本語: レビュー用ツール＋スケジューラツール / English: Review tools plus scheduler tools
 REVIEW_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         REVIEW_DECISION_TOOL_NAME,

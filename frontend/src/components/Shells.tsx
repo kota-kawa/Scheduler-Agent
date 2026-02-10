@@ -7,6 +7,7 @@ const { createElement: h } = React;
 
 interface NavBarProps {}
 
+// 日本語: グローバルナビゲーション / English: Global navigation bar
 export const NavBar = (_props: NavBarProps) =>
   h(
     "nav",
@@ -63,6 +64,7 @@ interface MainShellProps {
   onModelChange: (model: string) => void;
 }
 
+// 日本語: 通常表示のアプリシェル / English: Main application shell
 export const MainShell = ({ children, onRefresh, flashMessages, onModelChange }: MainShellProps) =>
   h(
     Fragment,
@@ -89,6 +91,7 @@ interface StandaloneShellProps {
   children: React.ReactNode;
 }
 
+// 日本語: ヘッダなしの簡易シェル / English: Minimal shell without header
 export const StandaloneShell = ({ children }: StandaloneShellProps) =>
   h("div", { className: "standalone-container" }, children);
 
@@ -98,6 +101,7 @@ interface EmbedShellProps {
   content: React.ReactNode;
 }
 
+// 日本語: 埋め込み用シェル / English: Shell for embedded calendar
 export const EmbedShell = ({ yearTitle, nav, content }: EmbedShellProps) =>
   h(
     "div",

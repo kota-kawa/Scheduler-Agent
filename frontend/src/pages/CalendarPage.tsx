@@ -8,6 +8,7 @@ import type { RoutinesResponse, Routine, SampleDataResponse } from "../types/api
 
 const { createElement: h } = React;
 
+// 日本語: 曜日モーダルの状態 / English: State for weekday modal
 interface ModalState {
   loading: boolean;
   error: string | null;
@@ -15,11 +16,13 @@ interface ModalState {
   title: string;
 }
 
+// 日本語: 曜日別ルーチンモーダルの props / English: Props for weekday routines modal
 interface DayRoutinesModalProps {
   modalRef: React.RefObject<HTMLDivElement | null>;
   modalState: ModalState;
 }
 
+// 日本語: 曜日ごとのルーチン一覧を表示するモーダル / English: Modal showing routines per weekday
 const DayRoutinesModal = ({ modalRef, modalState }: DayRoutinesModalProps) =>
   h(
     "div",
@@ -112,6 +115,7 @@ interface CalendarPageProps {
   refreshToken: number;
 }
 
+// 日本語: 月間カレンダーページ / English: Monthly calendar page
 export const CalendarPage = ({
   dayLinkBase,
   showModal,
@@ -119,6 +123,7 @@ export const CalendarPage = ({
   basePath,
   refreshToken,
 }: CalendarPageProps) => {
+  // 日本語: URL パラメータから年月を取得 / English: Read year/month from query params
   const searchParams = new URLSearchParams(window.location.search);
   const yearParam = Number.parseInt(searchParams.get("year") || "", 10);
   const monthParam = Number.parseInt(searchParams.get("month") || "", 10);
@@ -131,9 +136,11 @@ export const CalendarPage = ({
   });
   const modalRef = useRef<HTMLDivElement | null>(null);
 
+  // 日本語: カレンダーデータを取得 / English: Fetch calendar data
   const { data, error } = useCalendarData(yearParam, monthParam, refreshToken);
 
   const handleDayHeaderClick = async (weekday: number) => {
+    // 日本語: 曜日ヘッダーのクリックでモーダル更新 / English: Open/update modal for weekday
     if (!showModal || !modalRef.current) return;
     const dayName = DAY_NAMES[weekday];
     setModalState({ loading: true, error: null, routines: [], title: `${dayName}曜日の登録ルーチン` });
@@ -159,6 +166,7 @@ export const CalendarPage = ({
   };
 
   const handleSampleData = async () => {
+    // 日本語: サンプルデータ投入（明日/明後日） / English: Seed sample data (tomorrow/day after)
     if (!confirm("明日と明後日のサンプルデータを追加しますか？\n（既存のデータは削除されません）")) {
       return;
     }
@@ -177,10 +185,12 @@ export const CalendarPage = ({
   };
 
   if (error) {
+    // 日本語: 取得失敗時はエラー表示 / English: Show error when fetching fails
     return h("div", { className: "alert alert-danger" }, "データの取得に失敗しました。");
   }
   if (!data) return null;
 
+  // 日本語: 前後月の遷移URLを生成 / English: Build prev/next month URLs
   const { prevMonth, prevYear, nextMonth, nextYear } = getMonthNav(data.year, data.month);
   const prevUrl = withPrefix(`${basePath}?year=${prevYear}&month=${prevMonth}`);
   const nextUrl = withPrefix(`${basePath}?year=${nextYear}&month=${nextMonth}`);

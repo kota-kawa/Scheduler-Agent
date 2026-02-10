@@ -8,13 +8,17 @@ import { getMonthNav } from "../utils/time";
 
 const { createElement: h } = React;
 
+// 日本語: 埋め込み用カレンダーページ / English: Embedded calendar page
 export const EmbedCalendarPage = () => {
+  // 日本語: URL パラメータから年月を取得 / English: Read year/month from query params
   const searchParams = new URLSearchParams(window.location.search);
   const yearParam = Number.parseInt(searchParams.get("year") || "", 10);
   const monthParam = Number.parseInt(searchParams.get("month") || "", 10);
+  // 日本語: カレンダーデータを取得 / English: Fetch calendar data
   const { data } = useCalendarData(yearParam, monthParam, 0);
   if (!data) return null;
 
+  // 日本語: 前後月の遷移リンク / English: Prev/next month navigation links
   const { prevMonth, prevYear, nextMonth, nextYear } = getMonthNav(data.year, data.month);
   const prevUrl = withPrefix(`/embed/calendar?year=${prevYear}&month=${prevMonth}`);
   const nextUrl = withPrefix(`/embed/calendar?year=${nextYear}&month=${nextMonth}`);

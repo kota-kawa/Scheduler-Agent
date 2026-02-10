@@ -4,12 +4,14 @@ import type { CalendarWeek } from "../types/api";
 
 const { createElement: h } = React;
 
+// 日本語: カレンダーグリッドの props / English: Props for calendar grid
 interface CalendarGridProps {
   calendarData: CalendarWeek[];
   today: string;
   dayLinkBase: string;
 }
 
+// 日本語: 月間カレンダーのグリッド表示 / English: Calendar grid renderer
 export const CalendarGrid = ({ calendarData, today, dayLinkBase }: CalendarGridProps) => {
   if (!calendarData) return null;
   return h(
@@ -25,6 +27,7 @@ export const CalendarGrid = ({ calendarData, today, dayLinkBase }: CalendarGridP
         ]
           .filter(Boolean)
           .join(" ");
+        // 日本語: 達成率に応じた表示 / English: Render based on completion ratio
         const ratio = day.total_steps > 0 ? day.completed_steps / day.total_steps : 0;
         const inlineStyle =
           day.total_routines === 0 && day.has_day_log

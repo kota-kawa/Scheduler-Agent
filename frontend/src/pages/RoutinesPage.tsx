@@ -9,11 +9,14 @@ interface RoutinesPageProps {
   refreshToken: number;
 }
 
+// 日本語: ルーチン管理ページ / English: Routines management page
 export const RoutinesPage = ({ refreshToken }: RoutinesPageProps) => {
+  // 日本語: ルーチン一覧の状態 / English: Routines list state
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // 日本語: ルーチン一覧を取得 / English: Load routines list
     let isActive = true;
     const load = async () => {
       try {
@@ -34,9 +37,11 @@ export const RoutinesPage = ({ refreshToken }: RoutinesPageProps) => {
   }, [refreshToken]);
 
   if (error) {
+    // 日本語: 取得失敗時のエラー表示 / English: Show fetch error
     return h("div", { className: "alert alert-danger" }, "データの取得に失敗しました。");
   }
 
+  // 日本語: 作成フォーム＋一覧を描画 / English: Render creation form and list
   return h(
     "div",
     { className: "row" },

@@ -7,9 +7,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# Multi-Agent-Platform の設定モーダルと揃えるデフォルト
+# 日本語: Multi-Agent-Platform の設定モーダルと揃えるデフォルト / English: Defaults aligned with the platform modal
 DEFAULT_SELECTION = {"provider": "groq", "model": "openai/gpt-oss-20b", "base_url": ""}
 
+# 日本語: UI 用の表示モデル一覧 / English: Available models for UI
 AVAILABLE_MODELS: List[Dict[str, str]] = [
     # Groq
     {"provider": "groq", "model": "openai/gpt-oss-20b", "label": "GPT-OSS 20B (Groq)"},
@@ -31,6 +32,7 @@ AVAILABLE_MODELS: List[Dict[str, str]] = [
     {"provider": "groq", "model": "qwen/qwen3-32b", "label": "Qwen3 32B (Groq)"},
 ]
 
+# 日本語: プロバイダごとの環境変数・既定URL / English: Provider-specific env vars and defaults
 PROVIDER_DEFAULTS: Dict[str, Dict[str, str | List[str] | None]] = {
     "openai": {
         "api_key_env": "OPENAI_API_KEY",
@@ -64,12 +66,14 @@ PROVIDER_DEFAULTS: Dict[str, Dict[str, str | List[str] | None]] = {
         "default_base_url": "https://api.groq.com/openai/v1",
     },
 }
+# 日本語: 画像入力対応プロバイダ / English: Providers that support vision input
 VISION_SUPPORTED_PROVIDERS = {"openai", "claude", "gemini"}
 
 _OVERRIDE_SELECTION: Dict[str, str | None] | None = None
 
 
 def _coerce_selection(raw: Dict[str, str] | None) -> Dict[str, str | None]:
+    # 日本語: selection を安全に正規化 / English: Normalize selection fields safely
     """Normalise provider/model/base_url fields and fall back to defaults."""
 
     provider = DEFAULT_SELECTION["provider"]
@@ -91,6 +95,7 @@ def _coerce_selection(raw: Dict[str, str] | None) -> Dict[str, str | None]:
 
 
 def _load_selection(agent_key: str) -> Dict[str, str | None]:
+    # 日本語: 共有設定ファイルから選択を読む / English: Load selection from shared settings
     env_path = os.getenv("MULTI_AGENT_SETTINGS_PATH")
     if env_path:
         platform_path = Path(env_path)
@@ -111,6 +116,7 @@ def _load_selection(agent_key: str) -> Dict[str, str | None]:
 
 
 def _resolve_api_key(meta: Dict[str, str | List[str] | None]) -> str:
+    # 日本語: API キーの候補を順番に探索 / English: Resolve API key from env candidates
     """Resolve provider-specific API key without exposing the value."""
 
     candidates = []
@@ -134,6 +140,7 @@ def _resolve_api_key(meta: Dict[str, str | List[str] | None]) -> str:
 
 
 def _normalise_base_url(provider: str, base_url: str | None, meta: Dict[str, str | List[str] | None]) -> str | None:
+    # 日本語: ベースURLの不整合を補正 / English: Normalize base URL per provider
     """Clamp base_url to the expected host/path for each provider to avoid stale values."""
 
     default_base = meta.get("default_base_url")
@@ -177,6 +184,7 @@ def _normalise_base_url(provider: str, base_url: str | None, meta: Dict[str, str
 
 
 def _resolve_base_url(meta: Dict[str, str | List[str] | None]) -> str | None:
+    # 日本語: base_url の環境変数オーバーライド / English: Resolve base URL override from env
     """Resolve base URL override for non-OpenAI providers. Returns None if using default."""
 
     env_names: List[str] = []
@@ -204,6 +212,7 @@ def _resolve_base_url(meta: Dict[str, str | List[str] | None]) -> str | None:
 
 
 def apply_model_selection(agent_key: str = "scheduler", override: Dict[str, str] | None = None) -> Tuple[str, str, str | None, str]:
+    # 日本語: モデル設定の最終決定 / English: Apply final model selection
     selection = _coerce_selection(override or _OVERRIDE_SELECTION or _load_selection(agent_key))
     provider = selection["provider"]
     model = selection["model"]
@@ -221,6 +230,7 @@ def apply_model_selection(agent_key: str = "scheduler", override: Dict[str, str]
 
 
 def update_override(selection: Dict[str, str] | None) -> Tuple[str, str, str | None, str]:
+    # 日本語: 一時的な上書き設定 / English: Update in-memory override
     """Set in-memory override and return applied config."""
 
     global _OVERRIDE_SELECTION
@@ -229,6 +239,7 @@ def update_override(selection: Dict[str, str] | None) -> Tuple[str, str, str | N
 
 
 def provider_supports_vision(provider: str) -> bool:
+    # 日本語: 画像対応可否の判定 / English: Determine vision capability
     """Return True when the selected provider allows multimodal/vision prompts."""
 
     if not isinstance(provider, str):
@@ -237,6 +248,7 @@ def provider_supports_vision(provider: str) -> bool:
 
 
 def current_available_models() -> List[Dict[str, str]]:
+    # 日本語: UI へ提供するモデル一覧 / English: Expose models for the frontend
     """Expose available models list for the frontend."""
 
     return [dict(item) for item in AVAILABLE_MODELS]

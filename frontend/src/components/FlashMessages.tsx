@@ -6,6 +6,7 @@ interface FlashMessagesProps {
   messages: string[];
 }
 
+// 日本語: フラッシュメッセージ一覧 / English: Flash message list
 export const FlashMessages = ({ messages }: FlashMessagesProps) => {
   if (!messages || messages.length === 0) return null;
   return h(

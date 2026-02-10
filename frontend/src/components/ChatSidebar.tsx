@@ -19,7 +19,9 @@ interface ChatSidebarProps {
   onModelChange?: (model: string) => void;
 }
 
+// 日本語: チャットサイドバー（モデル選択＋会話） / English: Chat sidebar (model selection + conversation)
 export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
+  // 日本語: UI 状態と選択モデル / English: UI state and selected model
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState(
     `${DEFAULT_MODEL.provider}:${DEFAULT_MODEL.model}`
@@ -40,12 +42,14 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     return [{ ...DEFAULT_MODEL, label: "GPT-OSS 20B (Groq)" }];
   }, [modelOptions]);
 
+  // 日本語: 表示用メッセージの追加 / English: Append a display message
   const appendMessage = (role: ChatMessage["role"], content: string, timestamp?: string) => {
     const timeDisplay = timestamp || nowTime();
     historyRef.current = [...historyRef.current, { role, content }];
     setMessages((prev) => [...prev, { role, content, timeDisplay }]);
   };
 
+  // 日本語: サーバーの履歴を復元 / English: Load chat history from server
   const loadChatHistory = async () => {
     try {
       const data = await fetchJson<ChatHistoryResponse>("/api/chat/history");
@@ -73,6 +77,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     }
   };
 
+  // 日本語: 選択モデルをサーバーへ反映 / English: Persist model selection
   const updateModelSelection = async (value: string) => {
     const fallbackValue = `${DEFAULT_MODEL.provider}:${DEFAULT_MODEL.model}`;
     const [providerRaw, modelRaw] = (value || fallbackValue).split(":");
@@ -94,6 +99,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     }
   };
 
+  // 日本語: モデル候補一覧を取得 / English: Load model options
   const loadModelOptions = async () => {
     let nextValue = `${DEFAULT_MODEL.provider}:${DEFAULT_MODEL.model}`;
     try {
@@ -126,6 +132,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     }
   };
 
+  // 日本語: サーバーへチャットリクエスト送信 / English: Send chat request to server
   const requestAssistantResponse = async () => {
     const payload = {
       messages: historyRef.current.map(({ role, content }) => ({ role, content })),
@@ -138,6 +145,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     });
   };
 
+  // 日本語: ユーザー送信処理 / English: Handle user submit
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isPaused || isSending) return;
@@ -165,6 +173,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     }
   };
 
+  // 日本語: 履歴リセット / English: Reset chat history
   const handleReset = async () => {
     if (!confirm("チャット履歴を削除しますか？")) return;
 
@@ -182,11 +191,13 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
   };
 
   useEffect(() => {
+    // 日本語: 初回ロード時にモデル/履歴を取得 / English: Load models and history on mount
     loadModelOptions();
     loadChatHistory();
   }, []);
 
   useEffect(() => {
+    // 日本語: モデル変更時に保存 / English: Save when model changes
     if (skipNextModelUpdateRef.current) {
       skipNextModelUpdateRef.current = false;
       return;

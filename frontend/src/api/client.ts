@@ -1,3 +1,4 @@
+// 日本語: API エラーを表す例外クラス / English: Error class for API failures
 export class ApiError extends Error {
   status: number;
   detail?: string;
@@ -9,10 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+// 日本語: 逆プロキシ用の prefix を meta から取得 / English: Read reverse-proxy prefix from meta tag
 const proxyPrefixMeta = document.querySelector("meta[name='proxy-prefix']");
 const proxyPrefixRaw = (proxyPrefixMeta?.getAttribute("content") || "").trim();
 const proxyPrefix = proxyPrefixRaw === "/" ? "" : proxyPrefixRaw.replace(/\/+$/, "");
 
+// 日本語: prefix を URL パスへ付与 / English: Add prefix to a path
 export const withPrefix = (path = "/"): string => {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   if (!proxyPrefix) return normalized;
@@ -20,6 +23,7 @@ export const withPrefix = (path = "/"): string => {
   return `${cleaned}${normalized}`.replace(/\/{2,}/g, "/");
 };
 
+// 日本語: 現在パスから prefix を除去 / English: Remove prefix from current path
 export const stripPrefixFromPath = (path: string): string => {
   if (!proxyPrefix) return path || "/";
   const cleaned = proxyPrefix.startsWith("/") ? proxyPrefix : `/${proxyPrefix}`;
@@ -30,6 +34,7 @@ export const stripPrefixFromPath = (path: string): string => {
   return path || "/";
 };
 
+// 日本語: JSON レスポンス用の fetch ラッパー / English: fetch wrapper for JSON responses
 export const fetchJson = async <T>(path: string, options?: RequestInit): Promise<T> => {
   const res = await fetch(withPrefix(path), options);
   if (!res.ok) {

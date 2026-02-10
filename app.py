@@ -33,16 +33,19 @@ from llm_client import (
 )
 from model_selection import apply_model_selection, current_available_models, update_override
 
+# 日本語: secrets.env から環境変数を読み込む / English: Load environment variables from secrets.env
 load_dotenv("secrets.env")
 
+# 日本語: アプリのベースディレクトリ / English: Base directory for resolving paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 日本語: PostgreSQL 接続文字列（未設定ならローカル既定値） / English: PostgreSQL URL with local fallback
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler",
 )
 
-
+# 日本語: PostgreSQL 専用の SQLAlchemy エンジンを構築 / English: Build a PostgreSQL-only SQLAlchemy engine
 def _build_engine(database_url: str):
     normalized_url = database_url
     if normalized_url.startswith("postgres://"):
@@ -52,11 +55,12 @@ def _build_engine(database_url: str):
     return create_engine(normalized_url)
 
 
+# 日本語: DB エンジンと初期化フラグ / English: DB engine and init guard
 engine = _build_engine(DATABASE_URL)
 _db_initialized = False
 _db_init_lock = threading.Lock()
 
-
+# 日本語: ルーチン（習慣）モデル / English: Routine (habit) model
 class Routine(SQLModel, table=True):
     __tablename__ = "routine"
 
@@ -68,7 +72,7 @@ class Routine(SQLModel, table=True):
         back_populates="routine", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
-
+# 日本語: ルーチン内のステップモデル / English: Step model inside a routine
 class Step(SQLModel, table=True):
     __tablename__ = "step"
 
@@ -81,7 +85,7 @@ class Step(SQLModel, table=True):
 
     routine: Routine | None = Relationship(back_populates="steps")
 
-
+# 日本語: 日次ステップログ / English: Daily log for each step
 class DailyLog(SQLModel, table=True):
     __tablename__ = "daily_log"
 
@@ -93,7 +97,7 @@ class DailyLog(SQLModel, table=True):
 
     step: Step | None = Relationship()
 
-
+# 日本語: 任意のカスタムタスク / English: Ad-hoc custom task
 class CustomTask(SQLModel, table=True):
     __tablename__ = "custom_task"
 
@@ -104,7 +108,7 @@ class CustomTask(SQLModel, table=True):
     done: bool = Field(default=False)
     memo: str | None = Field(default=None, max_length=200)
 
-
+# 日本語: 日報（1日単位のメモ） / English: Day log (daily memo)
 class DayLog(SQLModel, table=True):
     __tablename__ = "day_log"
 
@@ -112,7 +116,7 @@ class DayLog(SQLModel, table=True):
     date: datetime.date
     content: str | None = Field(default=None, sa_column=Column(Text))
 
-
+# 日本語: チャット履歴 / English: Chat history storage
 class ChatHistory(SQLModel, table=True):
     __tablename__ = "chat_history"
 
@@ -121,7 +125,7 @@ class ChatHistory(SQLModel, table=True):
     content: str = Field(sa_column=Column(Text, nullable=False))
     timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now)
 
-
+# 日本語: 評価用の結果ログ / English: Evaluation result storage
 class EvaluationResult(SQLModel, table=True):
     __tablename__ = "evaluation_result"
 
@@ -134,20 +138,23 @@ class EvaluationResult(SQLModel, table=True):
     is_success: bool | None = Field(default=None)
     comments: str | None = Field(default=None, sa_column=Column(Text))
 
-
+# 日本語: FastAPI アプリ本体 / English: Main FastAPI application
 app = FastAPI(root_path=os.getenv("PROXY_PREFIX", ""))
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 if not os.getenv("SESSION_SECRET"):
     raise ValueError("SESSION_SECRET environment variable is not set. Please set it in secrets.env.")
 
+# 日本語: セッションでフラッシュメッセージを扱う / English: Enable session storage for flash messages
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"])
 
+# 日本語: 静的ファイルとテンプレートの設定 / English: Static files and template setup
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
+# 日本語: 起動時にDBスキーマを一度だけ作成 / English: Create DB schema once at startup
 def _ensure_db_initialized() -> None:
     global _db_initialized
     if _db_initialized:
@@ -161,39 +168,47 @@ def _ensure_db_initialized() -> None:
 
 @app.on_event("startup")
 def _init_db() -> None:
+    # 日本語: アプリ起動時のDB初期化 / English: Initialize DB on app startup
     _ensure_db_initialized()
 
 
 def create_session() -> Session:
+    # 日本語: 背景タスク等で直接セッション生成 / English: Create a session for background usage
     _ensure_db_initialized()
     return Session(engine)
 
 
 def get_db() -> Iterator[Session]:
+    # 日本語: FastAPI の依存性注入用 DB セッション / English: DB session dependency for FastAPI
     _ensure_db_initialized()
     with Session(engine) as db:
         yield db
 
 
 def flash(request: Request, message: str) -> None:
+    # 日本語: セッションにフラッシュメッセージを追加 / English: Add a flash message to session
     flashes = request.session.setdefault("_flashes", [])
     flashes.append(message)
     request.session["_flashes"] = flashes
 
 
 def pop_flashed_messages(request: Request) -> List[str]:
+    # 日本語: フラッシュメッセージを取得し削除 / English: Pop and clear flash messages
     return request.session.pop("_flashes", [])
 
 
 @app.get("/api/flash", name="api_flash")
 def api_flash(request: Request):
+    # 日本語: フラッシュメッセージ取得API / English: API to retrieve flash messages
     return {"messages": pop_flashed_messages(request)}
 
 
 def template_response(request: Request, template_name: str, context: Dict[str, Any]) -> HTMLResponse:
+    # 日本語: Jinja テンプレートへ共通コンテキストを付与 / English: Render template with shared context
     payload = dict(context)
     payload.setdefault("request", request)
 
+    # 日本語: 逆プロキシ配下でもURL生成が崩れないように補正 / English: Adjust URL generation for reverse proxy
     forwarded_prefix = (request.headers.get("x-forwarded-prefix") or "").strip()
     if "," in forwarded_prefix:
         forwarded_prefix = forwarded_prefix.split(",", 1)[0].strip()
@@ -242,9 +257,10 @@ def template_response(request: Request, template_name: str, context: Dict[str, A
     return templates.TemplateResponse(template_name, payload)
 
 
-# Helpers
+# 日本語: ヘルパー群 / English: Helper functions
 
 def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
+    # 日本語: 曜日（0=月）に紐づくルーチン一覧 / English: Routines scheduled for the given weekday
     all_routines = db.exec(select(Routine)).all()
     matched = []
     for r in all_routines:
@@ -254,6 +270,7 @@ def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
 
 
 def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
+    # 日本語: 多様な入力を安全に日付へ変換 / English: Safely coerce inputs into a date
     if isinstance(value, datetime.date):
         return value
     if isinstance(value, str) and value.strip():
@@ -268,6 +285,7 @@ def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
 
 
 def _bool_from_value(value: Any, default: bool = False) -> bool:
+    # 日本語: 文字列/数値を boolean に正規化 / English: Normalize string/number to boolean
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -282,6 +300,7 @@ def _bool_from_value(value: Any, default: bool = False) -> bool:
 
 
 def _get_timeline_data(db: Session, date_obj: datetime.date):
+    # 日本語: 日付のタイムライン項目と達成率を構築 / English: Build timeline items and completion rate
     routines = get_weekday_routines(db, date_obj.weekday())
     custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
 
@@ -334,6 +353,7 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
 
 
 def _build_scheduler_context(db: Session, today: datetime.date | None = None) -> str:
+    # 日本語: LLM へ渡す当日コンテキストを生成 / English: Build LLM context for the scheduler
     today = today or datetime.date.today()
     routines = db.exec(select(Routine)).all()
     today_logs = {
@@ -387,6 +407,7 @@ def _build_scheduler_context(db: Session, today: datetime.date | None = None) ->
 
 
 def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
+    # 日本語: LLM のアクション指示を DB へ適用 / English: Apply LLM action directives to the DB
     results = []
     errors = []
     modified_ids = []
@@ -396,6 +417,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
         return results, errors, modified_ids
 
     try:
+        # 日本語: アクション種別ごとに処理を分岐 / English: Dispatch by action type
         for action in actions:
             if not isinstance(action, dict):
                 continue
@@ -845,6 +867,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
     return results, errors, modified_ids
 
 
+# 日本語: 月間カレンダーの集計 API / English: Monthly calendar summary API
 @app.get("/api/calendar", name="api_calendar")
 def api_calendar(request: Request, db: Session = Depends(get_db)):
     today = datetime.date.today()
@@ -902,16 +925,18 @@ def api_calendar(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# 日本語: SPA ルート（カレンダー画面） / English: SPA entry route (calendar)
 @app.get("/", response_class=HTMLResponse, name="index")
 def index(request: Request, db: Session = Depends(get_db)):
     return template_response(request, "spa.html", {"page_id": "index"})
 
 
+# 日本語: エージェント評価用カレンダー / English: Agent result calendar page
 @app.get("/agent-result", response_class=HTMLResponse, name="agent_result")
 def agent_result(request: Request, db: Session = Depends(get_db)):
     return template_response(request, "spa.html", {"page_id": "agent-result"})
 
-
+# 日本語: エージェント結果の1日ビュー / English: Agent result day view
 @app.api_route(
     "/agent-result/day/{date_str}", methods=["GET", "POST"], response_class=HTMLResponse, name="agent_day_view"
 )
@@ -999,11 +1024,13 @@ async def agent_day_view(request: Request, date_str: str, db: Session = Depends(
     return template_response(request, "spa.html", {"page_id": "agent-day"})
 
 
+# 日本語: 埋め込み用カレンダー画面 / English: Embedded calendar view
 @app.get("/embed/calendar", response_class=HTMLResponse, name="embed_calendar")
 def embed_calendar(request: Request, db: Session = Depends(get_db)):
     return template_response(request, "spa.html", {"page_id": "embed-calendar"})
 
 
+# 日本語: 日次詳細データ API / English: Day detail API
 @app.get("/api/day/{date_str}", name="api_day_view")
 def api_day_view(date_str: str, db: Session = Depends(get_db)):
     try:
@@ -1067,6 +1094,7 @@ def api_day_view(date_str: str, db: Session = Depends(get_db)):
     }
 
 
+# 日本語: 月間カレンダーの集計 API（重複ルート） / English: Monthly calendar summary API (duplicate route)
 @app.get("/api/calendar", name="api_calendar")
 def api_calendar(request: Request, db: Session = Depends(get_db)):
     today = datetime.date.today()
@@ -1124,6 +1152,7 @@ def api_calendar(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# 日本語: 日次ビュー（表示＋フォーム更新） / English: Day view (render + form updates)
 @app.api_route("/day/{date_str}", methods=["GET", "POST"], response_class=HTMLResponse, name="day_view")
 async def day_view(request: Request, date_str: str, db: Session = Depends(get_db)):
     try:
@@ -1209,6 +1238,7 @@ async def day_view(request: Request, date_str: str, db: Session = Depends(get_db
     return template_response(request, "spa.html", {"page_id": "day"})
 
 
+# 日本語: 曜日別ルーチン一覧 API / English: Routines by weekday API
 @app.get("/api/routines/day/{weekday}", name="api_routines_by_day")
 def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
     routines = get_weekday_routines(db, weekday)
@@ -1225,6 +1255,7 @@ def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
     return {"routines": serialized_routines}
 
 
+# 日本語: ルーチン一覧 API / English: Routines list API
 @app.get("/api/routines", name="api_routines")
 def api_routines(db: Session = Depends(get_db)):
     routines = db.exec(select(Routine)).all()
@@ -1239,11 +1270,13 @@ def api_routines(db: Session = Depends(get_db)):
     return {"routines": serialized_routines}
 
 
+# 日本語: ルーチン管理ページ / English: Routines management page
 @app.get("/routines", response_class=HTMLResponse, name="routines_list")
 def routines_list(request: Request, db: Session = Depends(get_db)):
     return template_response(request, "spa.html", {"page_id": "routines"})
 
 
+# 日本語: ルーチン追加（フォーム） / English: Add routine (form submit)
 @app.post("/routines/add", name="add_routine")
 async def add_routine(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
@@ -1257,6 +1290,7 @@ async def add_routine(request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ルーチン削除 / English: Delete routine
 @app.post("/routines/{id}/delete", name="delete_routine")
 def delete_routine(request: Request, id: int, db: Session = Depends(get_db)):
     r = db.get(Routine, id)
@@ -1267,6 +1301,7 @@ def delete_routine(request: Request, id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ステップ追加 / English: Add step to routine
 @app.post("/routines/{id}/step/add", name="add_step")
 async def add_step(request: Request, id: int, db: Session = Depends(get_db)):
     form = await request.form()
@@ -1283,6 +1318,7 @@ async def add_step(request: Request, id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ステップ削除 / English: Delete step
 @app.post("/steps/{id}/delete", name="delete_step")
 def delete_step(request: Request, id: int, db: Session = Depends(get_db)):
     s = db.get(Step, id)
@@ -1293,6 +1329,7 @@ def delete_step(request: Request, id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: モデル選択肢と現在値の取得 / English: Get available models and current selection
 @app.get("/api/models", name="list_models")
 def list_models():
     provider, model, base_url, _ = apply_model_selection("scheduler")
@@ -1302,6 +1339,7 @@ def list_models():
     }
 
 
+# 日本語: モデル設定の更新 / English: Update model settings
 @app.post("/model_settings", name="update_model_settings")
 async def update_model_settings(request: Request):
     try:
@@ -1321,6 +1359,7 @@ async def update_model_settings(request: Request):
     return {"status": "ok", "applied": {"provider": provider, "model": model, "base_url": base_url}}
 
 
+# 日本語: チャット履歴の取得/削除 / English: Fetch or clear chat history
 @app.api_route("/api/chat/history", methods=["GET", "DELETE"], name="manage_chat_history")
 async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
     if request.method == "DELETE":
@@ -1341,6 +1380,7 @@ async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# 日本語: LLM 連携の中心処理 / English: Core LLM-driven chat processing
 def process_chat_request(
     db: Session, message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True
 ) -> Dict[str, Any]:
@@ -1424,6 +1464,7 @@ def process_chat_request(
     return {"reply": final_reply, "should_refresh": (len(results) > 0), "modified_ids": modified_ids}
 
 
+# 日本語: チャット API（UI から呼ばれる） / English: Chat API for UI
 @app.post("/api/chat", name="chat")
 async def chat(request: Request, db: Session = Depends(get_db)):
     try:
@@ -1454,11 +1495,13 @@ async def chat(request: Request, db: Session = Depends(get_db)):
     return result
 
 
+# 日本語: 評価ページ / English: Evaluation page
 @app.get("/evaluation", response_class=HTMLResponse, name="evaluation_page")
 def evaluation_page(request: Request):
     return template_response(request, "spa.html", {"page_id": "evaluation"})
 
 
+# 日本語: 評価用チャット API / English: Evaluation chat API
 @app.post("/api/evaluation/chat", name="evaluation_chat")
 async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
     try:
@@ -1525,6 +1568,7 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
     return {"reply": final_reply, "raw_reply": reply_text, "actions": actions, "results": results, "errors": errors}
 
 
+# 日本語: 評価データの初期化 / English: Reset evaluation data
 @app.post("/api/evaluation/reset", name="evaluation_reset")
 def evaluation_reset(db: Session = Depends(get_db)):
     try:
@@ -1540,6 +1584,7 @@ def evaluation_reset(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 日本語: 評価用のシード投入（単日） / English: Seed evaluation data (single day)
 @app.post("/api/evaluation/seed", name="evaluation_seed")
 async def evaluation_seed(request: Request, db: Session = Depends(get_db)):
     try:
@@ -1556,6 +1601,7 @@ async def evaluation_seed(request: Request, db: Session = Depends(get_db)):
     return {"status": "ok", "message": "; ".join(messages)}
 
 
+# 日本語: 評価用のシード投入（期間） / English: Seed evaluation data (period)
 @app.post("/api/evaluation/seed_period", name="evaluation_seed_period")
 async def evaluation_seed_period(request: Request, db: Session = Depends(get_db)):
     try:
@@ -1578,6 +1624,7 @@ async def evaluation_seed_period(request: Request, db: Session = Depends(get_db)
     return {"status": "ok", "message": "; ".join(messages)}
 
 
+# 日本語: 評価データを一定期間分作成 / English: Generate evaluation data over a period
 def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
     messages = []
 
@@ -1660,6 +1707,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
     return messages
 
 
+# 日本語: サンプルデータ投入 / English: Seed sample data for demo
 @app.post("/api/add_sample_data", name="add_sample_data")
 def add_sample_data(db: Session = Depends(get_db)):
     try:
@@ -1732,6 +1780,7 @@ def add_sample_data(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 日本語: 評価ログの保存 / English: Save evaluation log
 @app.post("/api/evaluation/log", name="evaluation_log")
 async def evaluation_log(request: Request, db: Session = Depends(get_db)):
     try:
@@ -1755,6 +1804,7 @@ async def evaluation_log(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 日本語: 評価履歴の取得 / English: Fetch evaluation history
 @app.get("/api/evaluation/history", name="evaluation_history")
 def evaluation_history(db: Session = Depends(get_db)):
     results = db.exec(

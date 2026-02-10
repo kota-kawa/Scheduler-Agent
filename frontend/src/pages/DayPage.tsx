@@ -6,6 +6,7 @@ import type { Routine, RoutinesResponse } from "../types/api";
 
 const { createElement: h } = React;
 
+// 日本語: Day ページの props / English: Props for Day page
 interface DayPageProps {
   dateStr: string;
   isStandalone: boolean;
@@ -14,6 +15,7 @@ interface DayPageProps {
   basePath: string;
 }
 
+// 日本語: 日次詳細ページ / English: Day detail page
 export const DayPage = ({
   dateStr,
   isStandalone,
@@ -21,10 +23,12 @@ export const DayPage = ({
   refreshIds,
   basePath,
 }: DayPageProps) => {
+  // 日本語: 日次データと該当曜日のルーチンを取得 / English: Fetch day data and weekday routines
   const { data, error } = useDayData(dateStr, refreshToken);
   const [routines, setRoutines] = useState<Routine[]>([]);
 
   useEffect(() => {
+    // 日本語: 曜日が取れたらルーチン一覧を取得 / English: Load routines when weekday is known
     let isActive = true;
     const load = async () => {
       if (!data || typeof data.weekday !== "number") {
@@ -47,15 +51,18 @@ export const DayPage = ({
   }, [data, refreshToken]);
 
   useEffect(() => {
+    // 日本語: 更新対象IDをハイライト / English: Highlight updated items
     if (!data || !refreshIds || refreshIds.length === 0) return;
     setTimeout(() => highlightIds(refreshIds), 50);
   }, [data, refreshIds, refreshToken]);
 
   if (error) {
+    // 日本語: 取得失敗時のエラー表示 / English: Show fetch error
     return h("div", { className: "alert alert-danger" }, "データの取得に失敗しました。");
   }
   if (!data) return null;
 
+  // 日本語: 戻り先とフォーム送信先 / English: Back link and form action
   const backUrl = withPrefix(basePath || "/");
   const formAction = withPrefix(stripPrefixFromPath(window.location.pathname || "/"));
 

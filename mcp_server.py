@@ -11,11 +11,13 @@ except ModuleNotFoundError as exc:
 
 from app import create_session, process_chat_request
 
+# 日本語: MCP サーバーのインスタンス / English: MCP server instance
 mcp_server = Server("scheduler-agent")
 
 
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
+    # 日本語: 提供ツールの一覧 / English: List available MCP tools
     """List available tools."""
     return [
         Tool(
@@ -37,8 +39,10 @@ async def list_tools() -> list[Tool]:
 
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: Any) -> List[types.TextContent]:
+    # 日本語: MCP ツール呼び出しを処理 / English: Handle MCP tool invocation
     """Handle tool calls."""
     if name == "manage_schedule":
+        # 日本語: 自然言語の指示をチャット処理へ委譲 / English: Forward NL instruction to chat processor
         instruction = ""
         if isinstance(arguments, dict):
             instruction = arguments.get("instruction", "")
@@ -46,6 +50,7 @@ async def call_tool(name: str, arguments: Any) -> List[types.TextContent]:
         if not instruction:
             return [types.TextContent(type="text", text="Error: instruction is required")]
 
+        # 日本語: DB セッションを明示的に開閉 / English: Explicit DB session lifecycle
         db = create_session()
         try:
             result = process_chat_request(db, instruction, save_history=False)

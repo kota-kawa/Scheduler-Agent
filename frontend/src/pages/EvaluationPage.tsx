@@ -9,7 +9,9 @@ interface EvaluationPageProps {
   currentModel: string;
 }
 
+// 日本語: 評価ワークフロー UI / English: Evaluation workflow UI
 export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
+  // 日本語: 評価シナリオの固定リスト / English: Fixed evaluation scenarios
   const scenarios = useMemo(
     () => [
       "「洗剤を買う」というタスクを追加して。",
@@ -39,6 +41,7 @@ export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
   const conversationRef = useRef<ChatMessage[]>([]);
 
   const refreshCalendarFrame = () => {
+    // 日本語: 評価用 iframe を再読み込み / English: Reload evaluation iframe
     const calFrame = document.getElementById("calendarFrame") as HTMLIFrameElement | null;
     if (calFrame && calFrame.contentWindow) {
       calFrame.contentWindow.location.reload();
@@ -46,6 +49,7 @@ export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
   };
 
   const runScenario = async (index: number) => {
+    // 日本語: シナリオを実行して結果を更新 / English: Run scenario and update results
     setRows((prev) => prev.map((row, idx) => (idx === index ? { ...row, loading: true } : row)));
 
     const prompt = rows[index].prompt;
@@ -104,6 +108,7 @@ export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
   };
 
   const logResult = async (index: number, isSuccess: boolean) => {
+    // 日本語: 成否判定をサーバーへ記録 / English: Log success/failure result
     const row = rows[index];
     if (!row.reply) return;
     try {
@@ -128,6 +133,7 @@ export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
   };
 
   const handleSeed = async () => {
+    // 日本語: 単日サンプルデータを投入 / English: Seed single-day sample data
     if (!confirm("サンプルデータを追加しますか？（先週金曜の日報などが作成されます）")) return;
     try {
       const data = await fetchJson<EvaluationSeedResponse>("/api/evaluation/seed", { method: "POST" });
@@ -140,6 +146,7 @@ export const EvaluationPage = ({ currentModel }: EvaluationPageProps) => {
   };
 
   const handleSeedPeriod = async () => {
+    // 日本語: 明日/明後日のサンプル予定を投入 / English: Seed sample tasks for tomorrow/day after
     const today = new Date();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);

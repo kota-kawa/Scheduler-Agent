@@ -18,6 +18,7 @@ from scheduler_tools import REVIEW_DECISION_TOOL_NAME, REVIEW_TOOLS, SCHEDULER_T
 
 
 def _content_to_text(content: Any) -> str:
+    # 日本語: さまざまな応答形式を文字列へ統一 / English: Normalize heterogeneous response content into text
     """Normalize chat completion content into a plain string."""
 
     if content is None:
@@ -57,6 +58,7 @@ def _content_to_text(content: Any) -> str:
 
 
 def _safe_json_loads(data: Any) -> Dict[str, Any]:
+    # 日本語: 例外を出さずに JSON を辞書へ / English: Parse JSON to dict without raising
     if isinstance(data, dict):
         return data
     if not isinstance(data, str):
@@ -69,6 +71,7 @@ def _safe_json_loads(data: Any) -> Dict[str, Any]:
 
 
 def _merge_dict(a: Dict[str, Any] | None, b: Dict[str, Any] | None) -> Dict[str, Any]:
+    # 日本語: 2つの辞書を安全にマージ / English: Safely merge two dicts
     merged: Dict[str, Any] = {}
     if isinstance(a, dict):
         merged.update(a)
@@ -78,6 +81,7 @@ def _merge_dict(a: Dict[str, Any] | None, b: Dict[str, Any] | None) -> Dict[str,
 
 
 def _claude_messages_from_openai(messages: List[Dict[str, str]]) -> Tuple[str, List[Dict[str, Any]]]:
+    # 日本語: OpenAI形式→Anthropic形式へ変換 / English: Convert OpenAI messages to Anthropic format
     """Convert OpenAI-style messages into Anthropic format."""
 
     system_parts: List[str] = []
@@ -103,6 +107,7 @@ def _claude_messages_from_openai(messages: List[Dict[str, str]]) -> Tuple[str, L
 
 
 def _extract_actions_from_tool_calls(tool_calls: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+    # 日本語: tool_calls からアクションとレビュー指示を抽出 / English: Extract actions and review decision
     """Convert OpenAI-style tool_calls into action payloads and optional review decision."""
 
     actions: List[Dict[str, Any]] = []
@@ -138,6 +143,7 @@ def _extract_actions_from_tool_calls(tool_calls: Any) -> Tuple[List[Dict[str, An
 
 
 def _extract_actions_from_claude_blocks(blocks: Any) -> Tuple[str, List[Dict[str, Any]], Dict[str, Any] | None]:
+    # 日本語: Claude の content blocks 解析 / English: Parse Claude content blocks
     """Parse Anthropic content blocks into reply text, actions, and optional review decision."""
 
     reply_parts: List[str] = []
@@ -172,6 +178,7 @@ def _extract_actions_from_claude_blocks(blocks: Any) -> Tuple[str, List[Dict[str
 
 
 def _openai_tool_to_anthropic(openai_tool: Dict[str, Any]) -> Dict[str, Any]:
+    # 日本語: ツール定義の形式変換 / English: Convert tool schema to Anthropic format
     """Convert OpenAI-style tool definition to Anthropic format."""
     function_def = openai_tool.get("function", {})
     return {
@@ -182,9 +189,11 @@ def _openai_tool_to_anthropic(openai_tool: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class UnifiedClient:
+    # 日本語: プロバイダ差異を吸収する統一クライアント / English: Provider-agnostic unified client
     """Provider-agnostic chat client aligned with IoT-Agent's selection logic."""
 
     def __init__(self):
+        # 日本語: 選択済みモデルと認証情報を取得 / English: Resolve model selection and credentials
         provider, model_name, base_url, api_key = apply_model_selection("scheduler")
 
         if not api_key:
@@ -218,6 +227,7 @@ class UnifiedClient:
         return self
 
     def create(self, **kwargs):
+        # 日本語: OpenAI互換 / Claude の呼び出しラッパー / English: Unified create wrapper
         if self.provider == "claude":
             return self._create_anthropic(**kwargs)
 
@@ -259,6 +269,7 @@ class UnifiedClient:
             raise last_exception
 
     def _create_anthropic(self, **kwargs):
+        # 日本語: Anthropic API 用の変換と呼び出し / English: Build Anthropic request and call
         model = kwargs.get("model", self.model_name)
         messages = kwargs.get("messages", [])
 
@@ -290,10 +301,12 @@ class UnifiedClient:
 
 
 def _current_timestamp() -> str:
+    # 日本語: 現在時刻の文字列 / English: Current timestamp string
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _sanitize_text(text: str) -> str:
+    # 日本語: モデル誤解釈を避けるためのテキスト洗浄 / English: Sanitize text to avoid tool syntax confusion
     """Remove patterns that might confuse the model, like Gemini's function call syntax."""
     if not isinstance(text, str):
         return str(text)
@@ -304,6 +317,7 @@ def _sanitize_text(text: str) -> str:
 
 
 def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[str, List[Dict[str, Any]]]:
+    # 日本語: ツール付き LLM 呼び出しとアクション抽出 / English: Call LLM with tools and extract actions
     """Call the selected LLM with structured tool definitions and return reply/actions."""
 
     client = UnifiedClient()
