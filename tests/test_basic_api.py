@@ -268,3 +268,30 @@ def test_apply_actions_rejects_relative_date_without_calculation():
     assert results == []
     assert modified == []
     assert any("resolve_schedule_expression" in err for err in errors)
+
+
+def test_build_final_reply_fallback_is_friendly_and_hides_internal_errors(monkeypatch):
+    class _FailSummaryClient:
+        def create(self, **_kwargs):
+            raise RuntimeError("summary unavailable")
+
+    monkeypatch.setattr(app_module, "UnifiedClient", _FailSummaryClient)
+
+    results = [
+        "計算結果: expression=再来週火曜の11時 date=2026-02-24 time=11:00 datetime=2026-02-24T11:00 source=relative_week+explicit_time",
+        "カスタムタスク「歯科検診」(ID: 7) を 2026-02-24 の 11:00 に追加しました。",
+    ]
+    errors = ["同じ参照/計算アクションが続いたため処理を終了しました。"]
+
+    reply = app_module._build_final_reply(
+        user_message="再来週火曜の11時に歯科検診を追加して",
+        reply_text="",
+        results=results,
+        errors=errors,
+    )
+
+    assert "✨ 実行しました！" in reply
+    assert "📅 2026-02-24 11:00 に「歯科検診」を追加しました！" in reply
+    assert "expression=" not in reply
+    assert "source=" not in reply
+    assert "同じ参照/計算アクション" not in reply
