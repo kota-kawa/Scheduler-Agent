@@ -171,3 +171,56 @@ def test_run_scheduler_multi_step_stops_duplicate_actions(monkeypatch):
     assert isinstance(execution.get("execution_trace"), list)
     assert len(execution.get("execution_trace", [])) == 1
     assert any("重複実行を停止" in err for err in execution["errors"])
+
+
+def test_resolve_schedule_expression_helper_relative_date_and_time():
+    resolved = app_module._resolve_schedule_expression(
+        expression="3日後 14:30",
+        base_date=datetime.date(2026, 2, 12),
+        base_time="09:00",
+        default_time="00:00",
+    )
+    assert resolved["ok"] is True
+    assert resolved["date"] == "2026-02-15"
+    assert resolved["time"] == "14:30"
+
+
+def test_apply_actions_resolve_schedule_expression():
+    db = _FakeSession()
+    actions = [
+        {
+            "type": "resolve_schedule_expression",
+            "expression": "来週火曜日 9時",
+            "base_date": "2026-02-12",
+            "default_time": "00:00",
+        }
+    ]
+    results, errors, modified = app_module._apply_actions(
+        db,
+        actions,
+        datetime.date(2026, 2, 12),
+    )
+    assert not errors
+    assert modified == []
+    assert any("date=2026-02-17" in line for line in results)
+    assert any("time=09:00" in line for line in results)
+
+
+def test_apply_actions_rejects_relative_date_without_calculation():
+    db = _FakeSession()
+    actions = [
+        {
+            "type": "create_custom_task",
+            "name": "買い物",
+            "date": "3日後",
+            "time": "10:00",
+        }
+    ]
+    results, errors, modified = app_module._apply_actions(
+        db,
+        actions,
+        datetime.date(2026, 2, 12),
+    )
+    assert results == []
+    assert modified == []
+    assert any("resolve_schedule_expression" in err for err in errors)

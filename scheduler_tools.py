@@ -31,6 +31,26 @@ REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 # 日本語: スケジューラ向けツール一覧 / English: Tool list for scheduler actions
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
+        "resolve_schedule_expression",
+        "相対的な日時表現（例: 3日後、来週火曜、2時間後、明日の9時）を絶対日時へ変換します。予定の作成・更新前に必ず使ってください。",
+        {
+            "expression": {"type": "string", "description": "変換したい日時表現"},
+            "base_date": {
+                "type": "string",
+                "description": "計算基準日 (YYYY-MM-DD)。省略時は today_date",
+            },
+            "base_time": {
+                "type": "string",
+                "description": "計算基準時刻 (HH:MM)。相対時刻計算で使用",
+            },
+            "default_time": {
+                "type": "string",
+                "description": "表現に時刻が無い場合の既定値 (HH:MM)",
+            },
+        },
+        required=["expression"],
+    ),
+    _build_tool(
         "create_custom_task",
         "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付を省略した場合は today_date を使ってください。",
         {

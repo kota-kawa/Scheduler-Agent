@@ -285,6 +285,356 @@ def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
     return default_date
 
 
+def _safe_build_date(year: int, month: int, day: int) -> datetime.date | None:
+    # 日本語: 例外なく日付を生成 / English: Build a date safely without raising
+    try:
+        return datetime.date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _normalize_hhmm(value: Any, fallback: str = "00:00") -> str:
+    # 日本語: 時刻文字列を HH:MM に正規化 / English: Normalize time strings to HH:MM
+    if not isinstance(value, str):
+        return fallback
+    text = value.strip()
+    if not text:
+        return fallback
+
+    colon_match = re.fullmatch(r"([01]?\d|2[0-3])\s*:\s*([0-5]\d)", text)
+    if colon_match:
+        hour = int(colon_match.group(1))
+        minute = int(colon_match.group(2))
+        return f"{hour:02d}:{minute:02d}"
+
+    hour_match = re.fullmatch(r"([01]?\d|2[0-3])\s*時(?:\s*([0-5]?\d)\s*分?)?", text)
+    if hour_match:
+        hour = int(hour_match.group(1))
+        minute = int(hour_match.group(2) or 0)
+        return f"{hour:02d}:{minute:02d}"
+
+    if text in {"正午"}:
+        return "12:00"
+    if text in {"深夜", "真夜中"}:
+        return "00:00"
+
+    return fallback
+
+
+def _extract_explicit_time(text: str) -> str | None:
+    # 日本語: テキスト中の明示時刻を抽出 / English: Extract explicit time from text
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    colon_match = re.search(r"([01]?\d|2[0-3])\s*:\s*([0-5]\d)", text)
+    if colon_match:
+        hour = int(colon_match.group(1))
+        minute = int(colon_match.group(2))
+        return f"{hour:02d}:{minute:02d}"
+
+    ampm_match = re.search(
+        r"(午前|午後)\s*([0-1]?\d)\s*時(?:\s*([0-5]?\d)\s*分?)?",
+        text,
+    )
+    if ampm_match:
+        marker = ampm_match.group(1)
+        hour = int(ampm_match.group(2))
+        minute = int(ampm_match.group(3) or 0)
+        if hour > 12 or minute > 59:
+            return None
+        if marker == "午後" and hour < 12:
+            hour += 12
+        if marker == "午前" and hour == 12:
+            hour = 0
+        return f"{hour:02d}:{minute:02d}"
+
+    half_match = re.search(r"([01]?\d|2[0-3])\s*時\s*半", text)
+    if half_match:
+        hour = int(half_match.group(1))
+        return f"{hour:02d}:30"
+
+    hour_match = re.search(r"([01]?\d|2[0-3])\s*時(?:\s*([0-5]?\d)\s*分?)?", text)
+    if hour_match:
+        hour = int(hour_match.group(1))
+        minute = int(hour_match.group(2) or 0)
+        return f"{hour:02d}:{minute:02d}"
+
+    if "正午" in text:
+        return "12:00"
+    if "深夜" in text or "真夜中" in text:
+        return "00:00"
+
+    return None
+
+
+def _extract_relative_time_delta(text: str) -> datetime.timedelta | None:
+    # 日本語: 「2時間後」等を差分へ変換 / English: Parse relative time phrases into timedelta
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    hours_minutes_match = re.search(
+        r"(\d+)\s*時間(?:\s*(\d+)\s*分)?\s*(後|前|まえ)",
+        text,
+    )
+    if hours_minutes_match:
+        hours = int(hours_minutes_match.group(1))
+        minutes = int(hours_minutes_match.group(2) or 0)
+        direction = hours_minutes_match.group(3)
+        sign = -1 if direction in {"前", "まえ"} else 1
+        return datetime.timedelta(minutes=sign * (hours * 60 + minutes))
+
+    minutes_match = re.search(r"(\d+)\s*分\s*(後|前|まえ)", text)
+    if minutes_match:
+        minutes = int(minutes_match.group(1))
+        direction = minutes_match.group(2)
+        sign = -1 if direction in {"前", "まえ"} else 1
+        return datetime.timedelta(minutes=sign * minutes)
+
+    return None
+
+
+def _extract_weekday(text: str) -> int | None:
+    # 日本語: 曜日トークンを 0=月..6=日 へ変換 / English: Convert weekday token to 0=Mon..6=Sun
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    ja_match = re.search(r"(月|火|水|木|金|土|日)(?:曜(?:日)?)", text)
+    if ja_match:
+        return {"月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6}.get(ja_match.group(1))
+
+    lower = text.lower()
+    weekday_tokens = {
+        "monday": 0,
+        "mon": 0,
+        "tuesday": 1,
+        "tue": 1,
+        "wednesday": 2,
+        "wed": 2,
+        "thursday": 3,
+        "thu": 3,
+        "friday": 4,
+        "fri": 4,
+        "saturday": 5,
+        "sat": 5,
+        "sunday": 6,
+        "sun": 6,
+    }
+    for token, weekday in weekday_tokens.items():
+        if re.search(rf"\b{re.escape(token)}\b", lower):
+            return weekday
+
+    return None
+
+
+def _resolve_date_expression(expression: str, base_date: datetime.date) -> tuple[datetime.date | None, str]:
+    # 日本語: 相対/絶対日付表現を日付へ解決 / English: Resolve relative/absolute date expression into date
+    if not isinstance(expression, str) or not expression.strip():
+        return None, "empty"
+
+    text = expression.strip()
+
+    explicit_patterns = [
+        r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})",
+        r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日?",
+    ]
+    for pattern in explicit_patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        candidate = _safe_build_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if candidate:
+            return candidate, "explicit_date"
+
+    month_day_match = re.search(r"(\d{1,2})月\s*(\d{1,2})日", text)
+    if month_day_match:
+        month = int(month_day_match.group(1))
+        day = int(month_day_match.group(2))
+        candidate = _safe_build_date(base_date.year, month, day)
+        if candidate and candidate < base_date:
+            candidate = _safe_build_date(base_date.year + 1, month, day) or candidate
+        if candidate:
+            return candidate, "month_day"
+
+    slash_month_day_match = re.search(r"(?<!\d)(\d{1,2})/(\d{1,2})(?!\d)", text)
+    if slash_month_day_match:
+        month = int(slash_month_day_match.group(1))
+        day = int(slash_month_day_match.group(2))
+        candidate = _safe_build_date(base_date.year, month, day)
+        if candidate and candidate < base_date:
+            candidate = _safe_build_date(base_date.year + 1, month, day) or candidate
+        if candidate:
+            return candidate, "month_day_slash"
+
+    relative_keywords = {
+        "一昨日": -2,
+        "おととい": -2,
+        "昨日": -1,
+        "きのう": -1,
+        "今日": 0,
+        "本日": 0,
+        "きょう": 0,
+        "明日": 1,
+        "あした": 1,
+        "明後日": 2,
+        "あさって": 2,
+    }
+    for token, offset in relative_keywords.items():
+        if token in text:
+            return base_date + datetime.timedelta(days=offset), "relative_keyword"
+
+    day_shift_match = re.search(r"(\d+)\s*日\s*(後|前|まえ)", text)
+    if day_shift_match:
+        days = int(day_shift_match.group(1))
+        direction = day_shift_match.group(2)
+        sign = -1 if direction in {"前", "まえ"} else 1
+        return base_date + datetime.timedelta(days=sign * days), "relative_day"
+
+    week_shift_match = re.search(r"(\d+)\s*(?:週間|週)\s*(後|前|まえ)", text)
+    if week_shift_match:
+        weeks = int(week_shift_match.group(1))
+        direction = week_shift_match.group(2)
+        sign = -1 if direction in {"前", "まえ"} else 1
+        return base_date + datetime.timedelta(days=sign * weeks * 7), "relative_week_count"
+
+    week_shift = None
+    if "再来週" in text or "翌々週" in text:
+        week_shift = 2
+    elif "来週" in text or "翌週" in text:
+        week_shift = 1
+    elif "先週" in text:
+        week_shift = -1
+    elif "今週" in text:
+        week_shift = 0
+
+    if week_shift is not None:
+        weekday = _extract_weekday(text)
+        if weekday is None:
+            weekday = base_date.weekday()
+        current_week_monday = base_date - datetime.timedelta(days=base_date.weekday())
+        return current_week_monday + datetime.timedelta(weeks=week_shift, days=weekday), "relative_week"
+
+    weekday = _extract_weekday(text)
+    if weekday is not None and ("次の" in text or "今度の" in text):
+        days_ahead = (weekday - base_date.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        return base_date + datetime.timedelta(days=days_ahead), "next_weekday"
+
+    if weekday is not None:
+        days_ahead = (weekday - base_date.weekday()) % 7
+        if days_ahead == 0 and "今週" not in text and "今日" not in text and "本日" not in text:
+            days_ahead = 7
+        return base_date + datetime.timedelta(days=days_ahead), "weekday"
+
+    try:
+        parsed = date_parser.parse(
+            text,
+            default=datetime.datetime.combine(base_date, datetime.time(hour=0, minute=0)),
+        )
+        return parsed.date(), "dateutil_parse"
+    except (ValueError, TypeError, OverflowError):
+        return None, "unresolved"
+
+
+def _resolve_schedule_expression(
+    expression: Any,
+    base_date: datetime.date,
+    base_time: str = "00:00",
+    default_time: str = "00:00",
+) -> Dict[str, Any]:
+    # 日本語: 相対日時表現を絶対日時に解決 / English: Resolve relative date/time expression to absolute datetime
+    text = str(expression).strip() if expression is not None else ""
+    if not text:
+        return {"ok": False, "error": "expression が空です。"}
+
+    normalized_base_time = _normalize_hhmm(base_time, "00:00")
+    normalized_default_time = _normalize_hhmm(default_time, normalized_base_time)
+    base_hour, base_minute = [int(part) for part in normalized_base_time.split(":")]
+    base_datetime = datetime.datetime.combine(
+        base_date, datetime.time(hour=base_hour, minute=base_minute)
+    )
+
+    relative_time_delta = _extract_relative_time_delta(text)
+    if relative_time_delta is not None:
+        resolved_datetime = base_datetime + relative_time_delta
+        return {
+            "ok": True,
+            "date": resolved_datetime.date().isoformat(),
+            "time": resolved_datetime.strftime("%H:%M"),
+            "datetime": resolved_datetime.strftime("%Y-%m-%dT%H:%M"),
+            "source": "relative_time_delta",
+        }
+
+    resolved_date, date_source = _resolve_date_expression(text, base_date)
+    if resolved_date is None:
+        return {
+            "ok": False,
+            "error": f"日付表現を解釈できませんでした: {text}",
+        }
+
+    explicit_time = _extract_explicit_time(text)
+    resolved_time = explicit_time or normalized_default_time
+    resolved_datetime = datetime.datetime.strptime(
+        f"{resolved_date.isoformat()} {resolved_time}",
+        "%Y-%m-%d %H:%M",
+    )
+
+    source = date_source if not explicit_time else f"{date_source}+explicit_time"
+    return {
+        "ok": True,
+        "date": resolved_date.isoformat(),
+        "time": resolved_time,
+        "datetime": resolved_datetime.strftime("%Y-%m-%dT%H:%M"),
+        "source": source,
+    }
+
+
+def _is_relative_datetime_text(value: Any) -> bool:
+    # 日本語: 相対日時表現らしさを判定 / English: Detect likely relative date/time expression
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text:
+        return False
+
+    relative_tokens = [
+        "今日",
+        "本日",
+        "明日",
+        "明後日",
+        "昨日",
+        "一昨日",
+        "来週",
+        "再来週",
+        "先週",
+        "今週",
+        "次の",
+        "今度の",
+        "きょう",
+        "あした",
+        "あさって",
+        "きのう",
+        "おととい",
+    ]
+    if any(token in text for token in relative_tokens):
+        return True
+
+    if re.search(r"(\d+)\s*(日|週|週間|時間|分)\s*(後|前|まえ)", text):
+        return True
+
+    if re.search(r"(月|火|水|木|金|土|日)(?:曜(?:日)?)", text):
+        return True
+
+    lower = text.lower()
+    if re.search(
+        r"\b(mon(day)?|tue(sday)?|wed(nesday)?|thu(rsday)?|fri(day)?|sat(urday)?|sun(day)?)\b",
+        lower,
+    ):
+        return True
+
+    return False
+
+
 def _bool_from_value(value: Any, default: bool = False) -> bool:
     # 日本語: 文字列/数値を boolean に正規化 / English: Normalize string/number to boolean
     if isinstance(value, bool):
@@ -441,13 +791,60 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
             action_type = action.get("type")
 
+            if action_type == "resolve_schedule_expression":
+                expression = action.get("expression")
+                if not isinstance(expression, str) or not expression.strip():
+                    errors.append("resolve_schedule_expression: expression が指定されていません。")
+                    continue
+                base_date_value = _parse_date(action.get("base_date"), default_date)
+                base_time_value = _normalize_hhmm(action.get("base_time"), "00:00")
+                default_time_value = _normalize_hhmm(
+                    action.get("default_time"),
+                    base_time_value,
+                )
+                calc = _resolve_schedule_expression(
+                    expression=expression,
+                    base_date=base_date_value,
+                    base_time=base_time_value,
+                    default_time=default_time_value,
+                )
+                if not calc.get("ok"):
+                    errors.append(
+                        "resolve_schedule_expression: "
+                        + str(calc.get("error") or "日時の計算に失敗しました。")
+                    )
+                    continue
+                results.append(
+                    "計算結果: "
+                    f"expression={expression.strip()} "
+                    f"date={calc.get('date')} "
+                    f"time={calc.get('time')} "
+                    f"datetime={calc.get('datetime')} "
+                    f"source={calc.get('source')}"
+                )
+                continue
+
             if action_type == "create_custom_task":
                 name = action.get("name")
                 if not isinstance(name, str) or not name.strip():
                     errors.append("create_custom_task: name が指定されていません。")
                     continue
-                date_value = _parse_date(action.get("date"), default_date)
-                time_value = action.get("time") if isinstance(action.get("time"), str) else "00:00"
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "create_custom_task: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日時へ変換してください。"
+                    )
+                    continue
+                raw_time_value = action.get("time")
+                if _is_relative_datetime_text(raw_time_value):
+                    errors.append(
+                        "create_custom_task: time に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日時へ変換してください。"
+                    )
+                    continue
+                date_value = _parse_date(raw_date_value, default_date)
+                time_value = raw_time_value if isinstance(raw_time_value, str) else "00:00"
                 memo = action.get("memo") if isinstance(action.get("memo"), str) else ""
                 new_task = CustomTask(
                     date=date_value, name=name.strip(), time=time_value.strip(), memo=memo.strip()
@@ -488,7 +885,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 if not step_obj:
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
-                date_value = _parse_date(action.get("date"), default_date)
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "toggle_step: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                date_value = _parse_date(raw_date_value, default_date)
                 log = db.exec(
                     select(DailyLog).where(
                         DailyLog.date == date_value, DailyLog.step_id == step_obj.id
@@ -599,7 +1003,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 if not isinstance(content, str) or not content.strip():
                     errors.append("update_log: content が指定されていません。")
                     continue
-                date_value = _parse_date(action.get("date"), default_date)
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "update_log: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                date_value = _parse_date(raw_date_value, default_date)
                 day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
                 if not day_log:
                     day_log = DayLog(date=date_value)
@@ -615,7 +1026,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 if not isinstance(content, str) or not content.strip():
                     errors.append("append_day_log: content が指定されていません。")
                     continue
-                date_value = _parse_date(action.get("date"), default_date)
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "append_day_log: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                date_value = _parse_date(raw_date_value, default_date)
                 day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
                 if not day_log:
                     day_log = DayLog(date=date_value)
@@ -634,7 +1052,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "get_day_log":
-                date_value = _parse_date(action.get("date"), default_date)
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "get_day_log: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                date_value = _parse_date(raw_date_value, default_date)
                 day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
                 if day_log and day_log.content:
                     results.append(f"{date_value} の日報:\n{day_log.content}")
@@ -782,8 +1207,16 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "list_tasks_in_period":
-                start_date = _parse_date(action.get("start_date"), default_date)
-                end_date = _parse_date(action.get("end_date"), default_date)
+                raw_start_date = action.get("start_date")
+                raw_end_date = action.get("end_date")
+                if _is_relative_datetime_text(raw_start_date) or _is_relative_datetime_text(raw_end_date):
+                    errors.append(
+                        "list_tasks_in_period: 相対日付が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                start_date = _parse_date(raw_start_date, default_date)
+                end_date = _parse_date(raw_end_date, default_date)
 
                 if start_date > end_date:
                     errors.append("list_tasks_in_period: 開始日が終了日より後です。")
@@ -830,7 +1263,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "get_daily_summary":
-                target_date = _parse_date(action.get("date"), default_date)
+                raw_date_value = action.get("date")
+                if _is_relative_datetime_text(raw_date_value):
+                    errors.append(
+                        "get_daily_summary: date に相対表現が含まれています。"
+                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                target_date = _parse_date(raw_date_value, default_date)
 
                 summary_parts = []
 
@@ -945,6 +1385,7 @@ def _build_round_feedback(
         f"{error_lines}\n"
         "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
         "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
+        "日付・時刻が相対表現（例: 3日後、来週、2時間後）なら resolve_schedule_expression を先に実行してから更新系ツールを呼んでください。\n"
         "同じ作成・更新系のアクションを重複して実行しないでください。"
     )
 

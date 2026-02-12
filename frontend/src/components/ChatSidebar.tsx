@@ -24,6 +24,7 @@ const THINKING_STEPS = [
 ];
 
 const ACTION_LABELS: Record<string, string> = {
+  resolve_schedule_expression: "日時を計算",
   create_custom_task: "予定を追加",
   delete_custom_task: "予定を削除",
   toggle_custom_task: "予定の完了状態を更新",
