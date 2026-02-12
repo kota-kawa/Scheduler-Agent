@@ -42,6 +42,16 @@ const App = () => {
       .catch(() => setFlashMessages([]));
   }, []);
 
+  useEffect(() => {
+    // 日本語: 一定時間経過後にメッセージを消去 / English: Auto-clear flash messages after 5 seconds
+    if (flashMessages.length > 0) {
+      const timer = setTimeout(() => {
+        setFlashMessages([]);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [flashMessages]);
+
   const handleRefresh = (ids?: Array<string | number>) => {
     // 日本語: ページ側へ再読み込みシグナル / English: Signal child pages to refresh
     setRefreshIds(ids || []);
