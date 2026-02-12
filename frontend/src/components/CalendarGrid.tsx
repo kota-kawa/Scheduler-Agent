@@ -51,9 +51,12 @@ export const CalendarGrid = ({ calendarData, today, dayLinkBase }: CalendarGridP
             h("span", { className: `day-number ${!day.is_current_month ? "text-muted" : ""}` }, day.day_num),
             h(
               "div",
-              { className: "d-flex gap-1" },
+              { className: "d-flex gap-1 align-items-center" },
               day.has_day_log
                 ? h("i", { className: "bi bi-journal-text text-primary", title: "日報あり" })
+                : null,
+              day.routine_count > 0
+                ? h("span", { className: "routine-indicator-dot", title: "ルーチンあり" })
                 : null,
               day.total_steps > 0
                 ? ratio === 1

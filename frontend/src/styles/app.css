@@ -298,6 +298,15 @@ body[data-page="agent-day"] .standalone-container {
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
+.routine-indicator-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--primary-color);
+    border-radius: 50%;
+    display: inline-block;
+    align-self: center;
+}
+
 /* Badges */
 .badge {
     padding: 0.5em 0.8em;

@@ -4,6 +4,8 @@ export interface CalendarDay {
   date: string;
   day_num: number;
   is_current_month: boolean;
+  routine_count: number;
+  custom_task_count: number;
   total_routines: number;
   total_steps: number;
   completed_steps: number;
