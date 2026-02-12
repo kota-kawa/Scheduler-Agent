@@ -3,6 +3,8 @@ import { fetchJson } from "../api/client";
 import { DEFAULT_MODEL, INITIAL_GREETING } from "../utils/constants";
 import { formatTimeFromIso, nowTime } from "../utils/time";
 import type {
+  ChatExecutionAction,
+  ChatExecutionTrace,
   ChatHistoryResponse,
   ChatMessage,
   ChatResponse,
@@ -13,6 +15,74 @@ import type {
 import type { ChatDisplayMessage } from "../types/ui";
 
 const { createElement: h } = React;
+
+const THINKING_STEPS = [
+  "依頼内容を読み取っています",
+  "予定データを確認しています",
+  "必要な操作を実行しています",
+  "回答を整えています",
+];
+
+const ACTION_LABELS: Record<string, string> = {
+  create_custom_task: "予定を追加",
+  delete_custom_task: "予定を削除",
+  toggle_custom_task: "予定の完了状態を更新",
+  update_custom_task_time: "予定時刻を変更",
+  rename_custom_task: "予定名を変更",
+  update_custom_task_memo: "予定メモを更新",
+  toggle_step: "ルーチンの完了状態を更新",
+  add_routine: "ルーチンを追加",
+  delete_routine: "ルーチンを削除",
+  update_routine_days: "ルーチン曜日を変更",
+  add_step: "ステップを追加",
+  delete_step: "ステップを削除",
+  update_step_time: "ステップ時刻を変更",
+  rename_step: "ステップ名を変更",
+  update_step_memo: "ステップメモを更新",
+  update_log: "日報を更新",
+  append_day_log: "日報に追記",
+  get_day_log: "日報を確認",
+  get_daily_summary: "1日の予定を確認",
+  list_tasks_in_period: "期間の予定を確認",
+};
+
+const trimValue = (value: unknown, max = 24): string => {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+};
+
+const describeAction = (action: ChatExecutionAction): string => {
+  const label = ACTION_LABELS[action.type] || action.type;
+  const params = action.params || {};
+  const name = trimValue(params.name);
+  const date = trimValue(params.date);
+  const time = trimValue(params.time);
+
+  const hints = [name, date, time].filter((part) => !!part);
+  if (hints.length > 0) return `${label}（${hints.join(" / ")}）`;
+  return label;
+};
+
+const buildExecutionTraceSummary = (trace?: ChatExecutionTrace[]): string => {
+  if (!Array.isArray(trace) || trace.length === 0) return "";
+
+  const lines: string[] = ["実行ログ（自動処理）"];
+  let index = 1;
+  for (const round of trace) {
+    if (!round || !Array.isArray(round.actions)) continue;
+    for (const action of round.actions) {
+      lines.push(`${index}. ${describeAction(action)}`);
+      index += 1;
+    }
+    if (Array.isArray(round.errors) && round.errors.length > 0) {
+      lines.push(`- 注意: ${round.errors[0]}`);
+    }
+  }
+  return lines.length > 1 ? lines.join("\n") : "";
+};
 
 interface ChatSidebarProps {
   onRefresh?: (ids?: Array<string | number>) => void;
@@ -30,6 +100,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
   const [inputValue, setInputValue] = useState("");
   const [isPaused, setIsPaused] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [thinkingStepIndex, setThinkingStepIndex] = useState(0);
 
   const historyRef = useRef<ChatMessage[]>([]);
   const baseUrlRef = useRef("");
@@ -43,9 +114,16 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
   }, [modelOptions]);
 
   // 日本語: 表示用メッセージの追加 / English: Append a display message
-  const appendMessage = (role: ChatMessage["role"], content: string, timestamp?: string) => {
+  const appendMessage = (
+    role: ChatMessage["role"],
+    content: string,
+    timestamp?: string,
+    persistToHistory = true
+  ) => {
     const timeDisplay = timestamp || nowTime();
-    historyRef.current = [...historyRef.current, { role, content }];
+    if (persistToHistory) {
+      historyRef.current = [...historyRef.current, { role, content }];
+    }
     setMessages((prev) => [...prev, { role, content, timeDisplay }]);
   };
 
@@ -158,6 +236,10 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
 
     try {
       const data = await requestAssistantResponse();
+      const executionSummary = buildExecutionTraceSummary(data.execution_trace);
+      if (executionSummary) {
+        appendMessage("assistant", executionSummary, undefined, false);
+      }
       const reply = typeof data.reply === "string" ? data.reply : "";
       const cleanReply = reply && reply.trim();
 
@@ -217,6 +299,20 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (!isSending) {
+      setThinkingStepIndex(0);
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      setThinkingStepIndex((prev) => {
+        if (prev >= THINKING_STEPS.length - 1) return prev;
+        return prev + 1;
+      });
+    }, 900);
+    return () => window.clearInterval(intervalId);
+  }, [isSending]);
 
   useEffect(() => {
     if (!isPaused && inputRef.current) {
@@ -285,7 +381,40 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
               )
             )
           )
-        )
+        ),
+        isSending
+          ? h(
+              "div",
+              { className: "message message--assistant message--thinking", key: "thinking-indicator" },
+              h("div", { className: "message__avatar" }, "🤖"),
+              h(
+                "div",
+                null,
+                h(
+                  "div",
+                  { className: "message__bubble thinking-bubble" },
+                  h(
+                    "div",
+                    { className: "thinking-bubble__title" },
+                    "Thinking",
+                    h(
+                      "span",
+                      { className: "thinking-bubble__dots", "aria-hidden": "true" },
+                      h("i", null),
+                      h("i", null),
+                      h("i", null)
+                    )
+                  ),
+                  h(
+                    "div",
+                    { className: "thinking-bubble__step" },
+                    THINKING_STEPS[Math.min(thinkingStepIndex, THINKING_STEPS.length - 1)]
+                  )
+                ),
+                h("div", { className: "message__meta" }, "LLM ・ 実行中")
+              )
+            )
+          : null
       )
     ),
     h(

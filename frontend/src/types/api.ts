@@ -83,10 +83,23 @@ export interface ChatRequest {
   messages: ChatMessage[];
 }
 
+export interface ChatExecutionAction {
+  type: string;
+  params?: Record<string, unknown>;
+}
+
+export interface ChatExecutionTrace {
+  round: number;
+  actions: ChatExecutionAction[];
+  results: string[];
+  errors: string[];
+}
+
 export interface ChatResponse {
   reply?: string;
   should_refresh?: boolean;
   modified_ids?: string[];
+  execution_trace?: ChatExecutionTrace[];
 }
 
 export interface ModelOption {
@@ -119,6 +132,7 @@ export interface EvaluationChatResponse {
   actions?: Record<string, unknown>[];
   results?: string[];
   errors?: string[];
+  execution_trace?: ChatExecutionTrace[];
 }
 
 export interface EvaluationSeedResponse {

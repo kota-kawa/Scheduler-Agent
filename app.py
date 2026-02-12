@@ -885,6 +885,206 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
     return results, errors, modified_ids
 
 
+def _get_max_action_rounds() -> int:
+    # 日本語: 複数ステップ実行の上限ラウンド / English: Maximum rounds for multi-step execution
+    raw_value = os.getenv("SCHEDULER_MAX_ACTION_ROUNDS", "4")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 4
+    return max(1, min(parsed, 8))
+
+
+def _action_signature(actions: List[Dict[str, Any]]) -> str:
+    # 日本語: アクション配列を比較用シグネチャへ / English: Build comparable signature for action list
+    signatures: List[str] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        try:
+            signatures.append(json.dumps(action, ensure_ascii=False, sort_keys=True))
+        except TypeError:
+            signatures.append(str(action))
+    return "|".join(signatures)
+
+
+def _dedupe_modified_ids(modified_ids: List[Any]) -> List[str]:
+    # 日本語: 更新IDを順序維持で重複排除 / English: Dedupe modified ids while preserving order
+    unique: List[str] = []
+    seen: set[str] = set()
+    for item in modified_ids:
+        if not isinstance(item, str):
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+
+def _build_round_feedback(
+    round_index: int,
+    actions: List[Dict[str, Any]],
+    results: List[str],
+    errors: List[str],
+) -> str:
+    # 日本語: 次ラウンドへ渡す実行ログ / English: Execution feedback passed to the next round
+    action_lines = "\n".join(
+        f"- {json.dumps(action, ensure_ascii=False, sort_keys=True)}" for action in actions
+    ) or "- (none)"
+    result_lines = "\n".join(f"- {item}" for item in results) or "- (none)"
+    error_lines = "\n".join(f"- {item}" for item in errors) or "- (none)"
+
+    return (
+        f"Execution round {round_index} completed.\n"
+        "executed_actions:\n"
+        f"{action_lines}\n"
+        "execution_results:\n"
+        f"{result_lines}\n"
+        "execution_errors:\n"
+        f"{error_lines}\n"
+        "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
+        "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
+        "同じ作成・更新系のアクションを重複して実行しないでください。"
+    )
+
+
+def _run_scheduler_multi_step(
+    db: Session,
+    formatted_messages: List[Dict[str, str]],
+    today: datetime.date,
+    max_rounds: int | None = None,
+) -> Dict[str, Any]:
+    # 日本語: LLM 呼び出しとアクション適用を複数ラウンド実行 / English: Run LLM/action cycle for multiple rounds
+    rounds_limit = max_rounds if isinstance(max_rounds, int) and max_rounds > 0 else _get_max_action_rounds()
+    working_messages = list(formatted_messages)
+
+    all_actions: List[Dict[str, Any]] = []
+    all_results: List[str] = []
+    all_errors: List[str] = []
+    all_modified_ids: List[str] = []
+    raw_replies: List[str] = []
+    execution_trace: List[Dict[str, Any]] = []
+
+    previous_signature = ""
+
+    for round_index in range(1, rounds_limit + 1):
+        context = _build_scheduler_context(db, today)
+
+        try:
+            reply_text, actions = call_scheduler_llm(working_messages, context)
+        except Exception as exc:
+            all_errors.append(f"LLM 呼び出しに失敗しました: {exc}")
+            break
+
+        reply_text = reply_text or ""
+        raw_replies.append(reply_text)
+
+        current_actions = [a for a in actions if isinstance(a, dict)] if isinstance(actions, list) else []
+        if not current_actions:
+            break
+
+        signature = _action_signature(current_actions)
+        if signature and signature == previous_signature:
+            all_errors.append("同一アクションが連続して提案されたため、重複実行を停止しました。")
+            break
+        previous_signature = signature
+
+        results, errors, modified_ids = _apply_actions(db, current_actions, today)
+        all_actions.extend(current_actions)
+        all_results.extend(results)
+        all_errors.extend(errors)
+        all_modified_ids.extend(modified_ids)
+        trace_actions = []
+        for action in current_actions:
+            action_type = action.get("type") if isinstance(action, dict) else None
+            params = {}
+            if isinstance(action, dict):
+                params = {k: v for k, v in action.items() if k != "type"}
+            trace_actions.append(
+                {
+                    "type": str(action_type or "unknown"),
+                    "params": params,
+                }
+            )
+        execution_trace.append(
+            {
+                "round": round_index,
+                "actions": trace_actions,
+                "results": list(results),
+                "errors": list(errors),
+            }
+        )
+
+        feedback = _build_round_feedback(round_index, current_actions, results, errors)
+        assistant_feedback = reply_text.strip() or "了解しました。"
+        working_messages = [
+            *working_messages,
+            {"role": "assistant", "content": assistant_feedback},
+            {"role": "system", "content": feedback},
+        ]
+    else:
+        all_errors.append(f"複数ステップ実行の上限（{rounds_limit}ラウンド）に達したため処理を終了しました。")
+
+    return {
+        "reply_text": raw_replies[-1] if raw_replies else "",
+        "raw_replies": raw_replies,
+        "actions": all_actions,
+        "results": all_results,
+        "errors": all_errors,
+        "modified_ids": _dedupe_modified_ids(all_modified_ids),
+        "execution_trace": execution_trace,
+    }
+
+
+def _build_final_reply(
+    user_message: str,
+    reply_text: str,
+    results: List[str],
+    errors: List[str],
+) -> str:
+    # 日本語: 実行結果を踏まえて最終返信を整形 / English: Build final user-facing reply from execution outputs
+    if not results and not errors:
+        final_reply = reply_text if reply_text else "了解しました。"
+        return _remove_no_schedule_lines(final_reply)
+
+    summary_client = UnifiedClient()
+
+    result_text = ""
+    if results:
+        result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
+    if errors:
+        result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
+
+    summary_system_prompt = (
+        "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
+        "ユーザーの要望に対してシステムがアクションを実行しました。\n"
+        "その「実行結果」をもとに、ユーザーへの最終的な回答を作成してください。\n"
+        "\n"
+        "## ガイドライン\n"
+        "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
+        "2. **分かりやすく**: 実行結果の羅列（「カスタムタスク[2]...」のような形式）は避け、人間が読みやすい文章に整形してください。\n"
+        "   - 例: 「12月10日の9時から『カラオケ』の予定が入っていますね！楽しんできてください🎤」\n"
+        "   - 予定がない日は `予定なし` と書かず、その行自体を省略してください。\n"
+        "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
+        "4. **元の文脈を維持**: ユーザーの元の発言に対する返答として自然になるようにしてください。\n"
+    )
+
+    summary_messages = [
+        {"role": "system", "content": summary_system_prompt},
+        {"role": "user", "content": f"ユーザーの発言: {user_message}\n\n{result_text}"},
+    ]
+
+    try:
+        resp = summary_client.create(messages=summary_messages, temperature=0.7, max_tokens=1000)
+        final_reply = _content_to_text(resp.choices[0].message.content)
+    except Exception as e:
+        final_reply = (reply_text or "") + ("\n\n" + result_text if result_text else "")
+        print(f"Summary LLM failed: {e}")
+
+    return _remove_no_schedule_lines(final_reply)
+
+
 # 日本語: 月間カレンダーの集計 API / English: Monthly calendar summary API
 @app.get("/api/calendar", name="api_calendar")
 def api_calendar(request: Request, db: Session = Depends(get_db)):
@@ -1424,55 +1624,13 @@ def process_chat_request(
             print(f"Failed to save user message: {e}")
 
     today = datetime.date.today()
-    context = _build_scheduler_context(db, today)
-
-    try:
-        reply_text, actions = call_scheduler_llm(formatted_messages, context)
-    except Exception as exc:
-        return {"reply": f"LLM 呼び出しに失敗しました: {exc}", "should_refresh": False, "modified_ids": []}
-
-    results, errors, modified_ids = _apply_actions(db, actions, today)
-
-    if results or errors:
-        summary_client = UnifiedClient()
-
-        result_text = ""
-        if results:
-            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
-        if errors:
-            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
-
-        summary_system_prompt = (
-            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
-            "ユーザーの要望に対してシステムがアクションを実行しました。\n"
-            "その「実行結果」をもとに、ユーザーへの最終的な回答を作成してください。\n"
-            "\n"
-            "## ガイドライン\n"
-            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
-            "2. **分かりやすく**: 実行結果の羅列（「カスタムタスク[2]...」のような形式）は避け、人間が読みやすい文章に整形してください。\n"
-            "   - 例: 「12月10日の9時から『カラオケ』の予定が入っていますね！楽しんできてください🎤」\n"
-            "   - 予定がない日は `予定なし` と書かず、その行自体を省略してください。\n"
-            "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
-            "4. **元の文脈を維持**: ユーザーの元の発言に対する返答として自然になるようにしてください。\n"
-        )
-
-        summary_messages = [
-            {"role": "system", "content": summary_system_prompt},
-            {"role": "user", "content": f"ユーザーの発言: {user_message}\n\n{result_text}"},
-        ]
-
-        try:
-            resp = summary_client.create(messages=summary_messages, temperature=0.7, max_tokens=1000)
-            final_reply = _content_to_text(resp.choices[0].message.content)
-
-        except Exception as e:
-            final_reply = (reply_text or "") + "\n\n" + result_text
-            print(f"Summary LLM failed: {e}")
-
-    else:
-        final_reply = reply_text if reply_text else "了解しました。"
-
-    final_reply = _remove_no_schedule_lines(final_reply)
+    execution = _run_scheduler_multi_step(db, formatted_messages, today)
+    final_reply = _build_final_reply(
+        user_message=user_message,
+        reply_text=execution.get("reply_text", ""),
+        results=execution.get("results", []),
+        errors=execution.get("errors", []),
+    )
 
     if save_history:
         try:
@@ -1482,7 +1640,13 @@ def process_chat_request(
             db.rollback()
             print(f"Failed to save assistant message: {e}")
 
-    return {"reply": final_reply, "should_refresh": (len(results) > 0), "modified_ids": modified_ids}
+    results = execution.get("results", [])
+    return {
+        "reply": final_reply,
+        "should_refresh": (len(results) > 0),
+        "modified_ids": execution.get("modified_ids", []),
+        "execution_trace": execution.get("execution_trace", []),
+    }
 
 
 # 日本語: チャット API（UI から呼ばれる） / English: Chat API for UI
@@ -1547,49 +1711,28 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="last message must be from user")
 
     today = datetime.date.today()
-    context = _build_scheduler_context(db, today)
+    execution = _run_scheduler_multi_step(db, formatted_messages, today)
+    reply_text = execution.get("reply_text", "")
+    results = execution.get("results", [])
+    errors = execution.get("errors", [])
+    actions = execution.get("actions", [])
 
-    try:
-        reply_text, actions = call_scheduler_llm(formatted_messages, context)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"LLM Error: {exc}")
+    user_message = formatted_messages[-1]["content"]
+    final_reply = _build_final_reply(
+        user_message=user_message,
+        reply_text=reply_text,
+        results=results,
+        errors=errors,
+    )
 
-    results, errors, modified_ids = _apply_actions(db, actions, today)
-
-    final_reply = reply_text
-    if results or errors:
-        summary_client = UnifiedClient()
-        result_text = ""
-        if results:
-            result_text += "【実行結果】\n" + "\n".join(f"- {item}" for item in results) + "\n"
-        if errors:
-            result_text += "【エラー】\n" + "\n".join(f"- {err}" for err in errors) + "\n"
-
-        summary_system_prompt = (
-            "あなたはユーザーのスケジュール管理をサポートする親しみやすいAIパートナーです。\n"
-            "ユーザーの要望に対してシステムがアクションを実行しました。\n"
-            "その「実行結果」をもとに、ユーザーへの最終的な回答を作成してください。\n"
-            "\n"
-            "## ガイドライン\n"
-            "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
-            "2. **分かりやすく**: 実行結果の羅列は避け、人間が読みやすい文章に整形してください。\n"
-            "   - 予定がない日は `予定なし` と書かず、その行自体を省略してください。\n"
-            "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
-        )
-        user_message = formatted_messages[-1]["content"]
-        summary_messages = [
-            {"role": "system", "content": summary_system_prompt},
-            {"role": "user", "content": f"ユーザーの発言: {user_message}\n\n{result_text}"},
-        ]
-        try:
-            resp = summary_client.create(messages=summary_messages, temperature=0.7, max_tokens=1000)
-            final_reply = _content_to_text(resp.choices[0].message.content)
-        except Exception:
-            final_reply = (reply_text or "") + "\n\n" + result_text
-
-    final_reply = _remove_no_schedule_lines(final_reply or "")
-
-    return {"reply": final_reply, "raw_reply": reply_text, "actions": actions, "results": results, "errors": errors}
+    return {
+        "reply": final_reply,
+        "raw_reply": reply_text,
+        "actions": actions,
+        "results": results,
+        "errors": errors,
+        "execution_trace": execution.get("execution_trace", []),
+    }
 
 
 # 日本語: 評価データの初期化 / English: Reset evaluation data
