@@ -2,6 +2,7 @@ import calendar
 import datetime
 import json
 import os
+import re
 import threading
 from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, Iterator, List, Union
@@ -297,6 +298,23 @@ def _bool_from_value(value: Any, default: bool = False) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return default
+
+
+def _remove_no_schedule_lines(text: str) -> str:
+    # 日本語: 「予定なし」を含む行を最終返信から除去 / English: Remove lines that include "no schedule" from replies
+    if not isinstance(text, str):
+        return str(text)
+
+    filtered_lines = []
+    for line in text.splitlines():
+        # 日本語: 文脈付き（例: 「2/12 予定なし」）でも確実に除去 / English: Remove contextual variants like "2/12 no schedule"
+        if re.search(r"予定\s*(?:な\s*し|無し)", line):
+            continue
+        filtered_lines.append(line)
+
+    cleaned = "\n".join(filtered_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def _get_timeline_data(db: Session, date_obj: datetime.date):
@@ -1433,6 +1451,7 @@ def process_chat_request(
             "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
             "2. **分かりやすく**: 実行結果の羅列（「カスタムタスク[2]...」のような形式）は避け、人間が読みやすい文章に整形してください。\n"
             "   - 例: 「12月10日の9時から『カラオケ』の予定が入っていますね！楽しんできてください🎤」\n"
+            "   - 予定がない日は `予定なし` と書かず、その行自体を省略してください。\n"
             "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
             "4. **元の文脈を維持**: ユーザーの元の発言に対する返答として自然になるようにしてください。\n"
         )
@@ -1452,6 +1471,8 @@ def process_chat_request(
 
     else:
         final_reply = reply_text if reply_text else "了解しました。"
+
+    final_reply = _remove_no_schedule_lines(final_reply)
 
     if save_history:
         try:
@@ -1552,6 +1573,7 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
             "## ガイドライン\n"
             "1. **フレンドリーに**: 絵文字（📅, ✅, ✨, 👍など）を適度に使用し、硬苦しくない丁寧語（です・ます）で話してください。\n"
             "2. **分かりやすく**: 実行結果の羅列は避け、人間が読みやすい文章に整形してください。\n"
+            "   - 予定がない日は `予定なし` と書かず、その行自体を省略してください。\n"
             "3. **エラーへの対応**: エラーがある場合は、優しくその旨を伝え、どうすればよいか（もし分かれば）示唆してください。\n"
         )
         user_message = formatted_messages[-1]["content"]
@@ -1564,6 +1586,8 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
             final_reply = _content_to_text(resp.choices[0].message.content)
         except Exception:
             final_reply = (reply_text or "") + "\n\n" + result_text
+
+    final_reply = _remove_no_schedule_lines(final_reply or "")
 
     return {"reply": final_reply, "raw_reply": reply_text, "actions": actions, "results": results, "errors": errors}
 

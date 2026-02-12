@@ -163,13 +163,7 @@ export const DayPage = ({
             { className: "card-body px-4 pt-2" },
             h("hr", { className: "mb-5 mt-2 opacity-10" }),
             data.timeline_items.length === 0
-              ? h(
-                  "div",
-                  { className: "text-center py-5" },
-                  h("div", { className: "mb-3 text-muted display-1" }, h("i", { className: "bi bi-calendar-check" })),
-                  h("h4", { className: "text-muted" }, "タスクがありません。"),
-                  h("p", { className: "text-muted" }, "上のフォームからタスクを追加してください。")
-                )
+              ? null
               : h(
                   "form",
                   { method: "POST", action: formAction },
@@ -296,20 +290,20 @@ export const DayPage = ({
                 )
           )
         ),
-        h(
-          "div",
-          { className: "card shadow-sm border-0 mb-4" },
-          h(
-            "div",
-            { className: "card-header bg-white border-0 pt-4 px-4" },
-            h("h6", { className: "text-uppercase text-muted mb-1" }, "Registered Routines"),
-            h("h5", { className: "fw-bold mb-0" }, "本日の登録ルーチン")
-          ),
-          h(
-            "div",
-            { className: "card-body px-4" },
-            routines.length > 0
-              ? h(
+        routines.length > 0
+          ? h(
+              "div",
+              { className: "card shadow-sm border-0 mb-4" },
+              h(
+                "div",
+                { className: "card-header bg-white border-0 pt-4 px-4" },
+                h("h6", { className: "text-uppercase text-muted mb-1" }, "Registered Routines"),
+                h("h5", { className: "fw-bold mb-0" }, "本日の登録ルーチン")
+              ),
+              h(
+                "div",
+                { className: "card-body px-4" },
+                h(
                   "div",
                   { className: "list-group list-group-flush" },
                   routines.map((routine) =>
@@ -365,13 +359,9 @@ export const DayPage = ({
                     )
                   )
                 )
-              : h(
-                  "div",
-                  { className: "text-center py-4" },
-                  h("p", { className: "text-muted mb-0" }, "本日の登録ルーチンはありません。")
-                )
-          )
-        ),
+              )
+            )
+          : null,
         h(
           "div",
           { id: "daily-log-wrapper" },

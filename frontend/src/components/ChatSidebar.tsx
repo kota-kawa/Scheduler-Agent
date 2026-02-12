@@ -160,7 +160,13 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
       const data = await requestAssistantResponse();
       const reply = typeof data.reply === "string" ? data.reply : "";
       const cleanReply = reply && reply.trim();
-      appendMessage("assistant", cleanReply || "了解しました。");
+
+      if (cleanReply) {
+        appendMessage("assistant", cleanReply);
+      } else if (data.should_refresh) {
+        // 日本語: アクション実行時は返信が空でも「了解しました。」を表示 / English: Show confirmation if action was taken
+        appendMessage("assistant", "了解しました。");
+      }
 
       if (data.should_refresh && onRefresh) {
         onRefresh(Array.isArray(data.modified_ids) ? data.modified_ids : []);

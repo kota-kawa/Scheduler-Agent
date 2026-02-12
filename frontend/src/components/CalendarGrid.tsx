@@ -73,9 +73,6 @@ export const CalendarGrid = ({ calendarData, today, dayLinkBase }: CalendarGridP
                   style: { width: `${ratio * 100}%` },
                 })
               )
-            : null,
-          day.total_routines === 0 && !day.has_day_log
-            ? h("div", { className: "text-muted small mt-2" }, "予定なし")
             : null
         );
       })
