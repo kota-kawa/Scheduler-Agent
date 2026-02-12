@@ -32,7 +32,7 @@ REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         "resolve_schedule_expression",
-        "相対的な日時表現（例: 3日後、来週火曜、2時間後、明日の9時）を絶対日時へ変換します。予定の作成・更新前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。",
+        "日時表現（例: 3日後、来週火曜、2時間後、明日の9時、2026-03-01、3/1、金曜日）を絶対日時へ変換します。today_date 以外の日付を扱う参照/更新の前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。週のみ指定（例: 来週）では date はその週の月曜日になり、週範囲（period_start/period_end）も返ります。",
         {
             "expression": {"type": "string", "description": "変換したい日時表現"},
             "base_date": {
@@ -52,7 +52,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "create_custom_task",
-        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付を省略した場合は today_date を使ってください。",
+        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付を省略した場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の計算結果を使って指定してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "name": {"type": "string", "description": "タスク名"},
@@ -69,7 +69,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "toggle_step",
-        "ステップの完了状態を更新します。日付が無い場合は today_date を利用してください。",
+        "ステップの完了状態を更新します。日付が無い場合は today_date を利用してください。today_date 以外の日付を指定する場合は resolve_schedule_expression で先に計算した日付を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "step_id": {"type": "integer", "description": "ステップID"},
@@ -117,7 +117,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "update_log",
-        "指定日付の日報（記録・メモ）を上書き保存します。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）を上書き保存します。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "日報本文"},
@@ -126,7 +126,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "append_day_log",
-        "指定日付の日報（記録・メモ）に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "追記する内容"},
@@ -135,7 +135,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "get_day_log",
-        "指定日付の日報（記録・メモ）を取得します。日付が無い場合は today_date を使ってください。",
+        "指定日付の日報（記録・メモ）を取得します。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
         {"date": {"type": "string", "description": "YYYY-MM-DD"}},
     ),
     _build_tool(
@@ -209,7 +209,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "list_tasks_in_period",
-        "指定期間のタスク・ルーチンステップ一覧を取得します。",
+        "指定期間のタスク・ルーチンステップ一覧を取得します。today_date を含まない期間、または today_date 以外の日付を含む期間を扱う場合は、開始日・終了日を resolve_schedule_expression で計算してから指定してください。『来週の予定確認』のような週単位確認は start_date=来週の月曜, end_date=来週の日曜 として指定してください。",
         {
             "start_date": {"type": "string", "description": "YYYY-MM-DD"},
             "end_date": {"type": "string", "description": "YYYY-MM-DD"},
@@ -218,7 +218,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "get_daily_summary",
-        "指定日付のサマリーを生成して返します。日付が無い場合は today_date を利用してください。",
+        "指定日付のサマリーを生成して返します。日付が無い場合は today_date を利用してください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
         {"date": {"type": "string", "description": "YYYY-MM-DD"}},
     ),
 ]

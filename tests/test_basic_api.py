@@ -276,6 +276,20 @@ def test_resolve_schedule_expression_helper_relative_date_and_time():
     assert resolved["time"] == "14:30"
 
 
+def test_resolve_schedule_expression_week_without_weekday_defaults_to_monday_and_period():
+    resolved = app_module._resolve_schedule_expression(
+        expression="来週",
+        base_date=datetime.date(2026, 2, 12),
+        base_time="09:00",
+        default_time="00:00",
+    )
+    assert resolved["ok"] is True
+    assert resolved["source"] == "relative_week"
+    assert resolved["date"] == "2026-02-16"
+    assert resolved["period_start"] == "2026-02-16"
+    assert resolved["period_end"] == "2026-02-22"
+
+
 def test_apply_actions_resolve_schedule_expression():
     db = _FakeSession()
     actions = [
@@ -295,6 +309,65 @@ def test_apply_actions_resolve_schedule_expression():
     assert modified == []
     assert any("date=2026-02-17" in line for line in results)
     assert any("time=09:00" in line for line in results)
+
+
+def test_apply_actions_resolve_schedule_expression_includes_week_period():
+    db = _FakeSession()
+    actions = [
+        {
+            "type": "resolve_schedule_expression",
+            "expression": "来週",
+            "base_date": "2026-02-12",
+            "default_time": "00:00",
+        }
+    ]
+    results, errors, modified = app_module._apply_actions(
+        db,
+        actions,
+        datetime.date(2026, 2, 12),
+    )
+    assert not errors
+    assert modified == []
+    assert any("period_start=2026-02-16" in line for line in results)
+    assert any("period_end=2026-02-22" in line for line in results)
+
+
+def test_run_scheduler_multi_step_normalizes_week_scope_confirmation(monkeypatch):
+    db = _FakeSession()
+    llm_calls = {"count": 0}
+    apply_calls = []
+
+    llm_sequence = [
+        ("来週の予定を確認します。", [{"type": "get_daily_summary", "date": "2026-02-18"}]),
+        ("確認完了です。", []),
+    ]
+
+    def _fake_call_scheduler_llm(_messages, _context):
+        idx = llm_calls["count"]
+        llm_calls["count"] += 1
+        return llm_sequence[idx]
+
+    def _fake_apply_actions(_db, actions, _today):
+        apply_calls.append(list(actions))
+        return (["2026-02-16 から 2026-02-22 までのタスク:\n- sample"], [], [])
+
+    monkeypatch.setattr(app_module, "_build_scheduler_context", lambda *_args, **_kwargs: "ctx")
+    monkeypatch.setattr(app_module, "call_scheduler_llm", _fake_call_scheduler_llm)
+    monkeypatch.setattr(app_module, "_apply_actions", _fake_apply_actions)
+
+    execution = app_module._run_scheduler_multi_step(
+        db,
+        [{"role": "user", "content": "来週の予定を確認して"}],
+        datetime.date(2026, 2, 12),
+        max_rounds=4,
+    )
+
+    assert apply_calls
+    first_action = apply_calls[0][0]
+    assert first_action["type"] == "list_tasks_in_period"
+    assert first_action["start_date"] == "2026-02-16"
+    assert first_action["end_date"] == "2026-02-22"
+    assert execution["results"]
 
 
 def test_apply_actions_rejects_relative_date_without_calculation():

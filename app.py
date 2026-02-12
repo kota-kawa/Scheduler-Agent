@@ -430,6 +430,46 @@ def _extract_weekday(text: str) -> int | None:
     return None
 
 
+def _extract_relative_week_shift(text: str) -> int | None:
+    # 日本語: 週相対表現（今週/来週/先週）を週オフセットへ変換 / English: Convert relative week token to week offset
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    if "再来週" in text or "翌々週" in text:
+        return 2
+    if "来週" in text or "翌週" in text:
+        return 1
+    if "先週" in text:
+        return -1
+    if "今週" in text:
+        return 0
+    return None
+
+
+def _week_bounds(anchor_date: datetime.date) -> tuple[datetime.date, datetime.date]:
+    # 日本語: 指定日の属する週（月曜開始）の範囲を返す / English: Return week bounds (Mon-Sun) for a date
+    start = anchor_date - datetime.timedelta(days=anchor_date.weekday())
+    end = start + datetime.timedelta(days=6)
+    return start, end
+
+
+def _resolve_week_period(expression: str, base_date: datetime.date) -> tuple[datetime.date, datetime.date] | None:
+    # 日本語: 「来週」など週単位表現を期間へ解決 / English: Resolve week-scoped expression into [start, end]
+    if not isinstance(expression, str) or not expression.strip():
+        return None
+
+    week_shift = _extract_relative_week_shift(expression)
+    if week_shift is None:
+        return None
+    if _extract_weekday(expression) is not None:
+        return None
+
+    current_week_monday = base_date - datetime.timedelta(days=base_date.weekday())
+    start_date = current_week_monday + datetime.timedelta(weeks=week_shift)
+    end_date = start_date + datetime.timedelta(days=6)
+    return start_date, end_date
+
+
 def _resolve_date_expression(expression: str, base_date: datetime.date) -> tuple[datetime.date | None, str]:
     # 日本語: 相対/絶対日付表現を日付へ解決 / English: Resolve relative/absolute date expression into date
     if not isinstance(expression, str) or not expression.strip():
@@ -500,20 +540,12 @@ def _resolve_date_expression(expression: str, base_date: datetime.date) -> tuple
         sign = -1 if direction in {"前", "まえ"} else 1
         return base_date + datetime.timedelta(days=sign * weeks * 7), "relative_week_count"
 
-    week_shift = None
-    if "再来週" in text or "翌々週" in text:
-        week_shift = 2
-    elif "来週" in text or "翌週" in text:
-        week_shift = 1
-    elif "先週" in text:
-        week_shift = -1
-    elif "今週" in text:
-        week_shift = 0
-
+    week_shift = _extract_relative_week_shift(text)
     if week_shift is not None:
         weekday = _extract_weekday(text)
         if weekday is None:
-            weekday = base_date.weekday()
+            # 曜日未指定の週表現は週の開始日（月曜）へ寄せる
+            weekday = 0
         current_week_monday = base_date - datetime.timedelta(days=base_date.weekday())
         return current_week_monday + datetime.timedelta(weeks=week_shift, days=weekday), "relative_week"
 
@@ -584,13 +616,21 @@ def _resolve_schedule_expression(
     )
 
     source = date_source if not explicit_time else f"{date_source}+explicit_time"
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "date": resolved_date.isoformat(),
         "time": resolved_time,
         "datetime": resolved_datetime.strftime("%Y-%m-%dT%H:%M"),
         "source": source,
     }
+
+    week_period = _resolve_week_period(text, base_date)
+    if week_period is not None:
+        period_start, period_end = week_period
+        response["period_start"] = period_start.isoformat()
+        response["period_end"] = period_end.isoformat()
+
+    return response
 
 
 def _is_relative_datetime_text(value: Any) -> bool:
@@ -863,6 +903,12 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                         + str(calc.get("error") or "日時の計算に失敗しました。")
                     )
                     continue
+                period_text = ""
+                if calc.get("period_start") and calc.get("period_end"):
+                    period_text = (
+                        f" period_start={calc.get('period_start')}"
+                        f" period_end={calc.get('period_end')}"
+                    )
                 results.append(
                     "計算結果: "
                     f"expression={expression.strip()} "
@@ -870,6 +916,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     f"time={calc.get('time')} "
                     f"datetime={calc.get('datetime')} "
                     f"source={calc.get('source')}"
+                    f"{period_text}"
                 )
                 continue
 
@@ -1448,6 +1495,102 @@ def _get_last_user_message_from_messages(formatted_messages: List[Dict[str, str]
     return ""
 
 
+def _try_parse_iso_date(value: Any) -> datetime.date | None:
+    # 日本語: YYYY-MM-DD のみを厳密に解析 / English: Strictly parse YYYY-MM-DD only
+    if isinstance(value, datetime.date):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return datetime.datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _is_week_scope_confirmation_request(user_message: str) -> bool:
+    # 日本語: 「来週の予定確認」など週全体の確認要求を判定 / English: Detect week-scoped schedule confirmation requests
+    if not isinstance(user_message, str):
+        return False
+    text = user_message.strip()
+    if not text:
+        return False
+    if _extract_relative_week_shift(text) is None:
+        return False
+    if _extract_weekday(text) is not None:
+        return False
+
+    schedule_tokens = ["予定", "スケジュール", "タスク", "日程"]
+    confirm_patterns = [
+        r"確認",
+        r"見せ",
+        r"教えて",
+        r"一覧",
+        r"表示",
+        r"把握",
+        r"知りたい",
+        r"ある\??$",
+        r"あります\??$",
+        r"入って",
+    ]
+    has_schedule = any(token in text for token in schedule_tokens)
+    has_confirm = any(re.search(pattern, text) for pattern in confirm_patterns)
+    return has_schedule and has_confirm
+
+
+def _normalize_actions_for_week_scope_confirmation(
+    actions: List[Dict[str, Any]],
+    user_message: str,
+) -> List[Dict[str, Any]]:
+    # 日本語: 週全体確認なのに単日参照になった場合を補正 / English: Normalize single-day reads into full-week reads when needed
+    if not _is_week_scope_confirmation_request(user_message):
+        return actions
+
+    normalized: List[Dict[str, Any]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            normalized.append(action)
+            continue
+
+        action_type = str(action.get("type", ""))
+        if action_type == "get_daily_summary":
+            target_date = _try_parse_iso_date(action.get("date"))
+            if target_date is None:
+                normalized.append(action)
+                continue
+            week_start, week_end = _week_bounds(target_date)
+            normalized.append(
+                {
+                    "type": "list_tasks_in_period",
+                    "start_date": week_start.isoformat(),
+                    "end_date": week_end.isoformat(),
+                }
+            )
+            continue
+
+        if action_type == "list_tasks_in_period":
+            start_date = _try_parse_iso_date(action.get("start_date"))
+            end_date = _try_parse_iso_date(action.get("end_date"))
+            if start_date is None or end_date is None:
+                normalized.append(action)
+                continue
+            if start_date == end_date or (start_date <= end_date and (end_date - start_date).days < 6):
+                week_start, week_end = _week_bounds(start_date)
+                updated = dict(action)
+                updated["start_date"] = week_start.isoformat()
+                updated["end_date"] = week_end.isoformat()
+                normalized.append(updated)
+            else:
+                normalized.append(action)
+            continue
+
+        normalized.append(action)
+
+    return normalized
+
+
 def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
     # 日本語: ユーザー要求を簡易ステップへ分解 / English: Infer coarse-grained requested steps from user text
     if not isinstance(user_message, str) or not user_message.strip():
@@ -1574,6 +1717,8 @@ def _extract_resolved_memory_from_actions(
                 "date": str(calc.get("date", "")),
                 "time": str(calc.get("time", "")),
                 "datetime": str(calc.get("datetime", "")),
+                "period_start": str(calc.get("period_start", "")),
+                "period_end": str(calc.get("period_end", "")),
             }
         )
     return memories
@@ -1597,7 +1742,10 @@ def _build_round_feedback(
     error_lines = "\n".join(f"- {item}" for item in errors) or "- (none)"
     progress_lines = _format_step_progress(inferred_steps or [], completed_steps)
     resolved_lines = "\n".join(
-        f"- expression={item.get('expression')} => date={item.get('date')} time={item.get('time')} datetime={item.get('datetime')}"
+        "- expression="
+        f"{item.get('expression')} => date={item.get('date')} "
+        f"time={item.get('time')} datetime={item.get('datetime')} "
+        f"period_start={item.get('period_start', '')} period_end={item.get('period_end', '')}"
         for item in (resolved_memory or [])[-3:]
     ) or "- (none)"
     duplicate_lines = f"duplicate_warning:\n- {duplicate_warning}\n" if duplicate_warning else ""
@@ -1617,7 +1765,7 @@ def _build_round_feedback(
         f"{error_lines}\n"
         "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
         "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
-        "日付・時刻が相対表現（例: 3日後、来週、2時間後）なら resolve_schedule_expression を先に実行してから更新系ツールを呼んでください。\n"
+        "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は resolve_schedule_expression を先に実行してから参照/更新ツールを呼んでください。\n"
         "直前と同じ参照/計算アクションを繰り返さず、next_expected_step を優先してください。\n"
         "同じ作成・更新系のアクションを重複して実行しないでください。"
     )
@@ -1672,6 +1820,7 @@ def _run_scheduler_multi_step(
         raw_replies.append(reply_text)
 
         current_actions = [a for a in actions if isinstance(a, dict)] if isinstance(actions, list) else []
+        current_actions = _normalize_actions_for_week_scope_confirmation(current_actions, user_message)
         if not current_actions:
             break
 
