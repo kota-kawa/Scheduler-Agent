@@ -148,6 +148,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
           role: msg.role,
           content: msg.content,
           timeDisplay: formatTimeFromIso(msg.timestamp),
+          executionLog: buildExecutionTraceSummary(msg.execution_trace),
         }));
         historyRef.current = data.history.map((msg) => ({
           role: msg.role,

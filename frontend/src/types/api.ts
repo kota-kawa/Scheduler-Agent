@@ -68,6 +68,7 @@ export interface ChatHistoryItem {
   role: ChatRole;
   content: string;
   timestamp: string;
+  execution_trace?: ChatExecutionTrace[];
 }
 
 export interface ChatHistoryResponse {

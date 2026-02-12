@@ -295,3 +295,48 @@ def test_build_final_reply_fallback_is_friendly_and_hides_internal_errors(monkey
     assert "expression=" not in reply
     assert "source=" not in reply
     assert "同じ参照/計算アクション" not in reply
+
+
+def test_execution_trace_storage_roundtrip():
+    trace = [{"round": 1, "actions": [{"type": "create_custom_task"}], "results": [], "errors": []}]
+    stored = app_module._attach_execution_trace_to_stored_content("返信テキスト", trace)
+    clean, extracted = app_module._extract_execution_trace_from_stored_content(stored)
+    assert clean == "返信テキスト"
+    assert isinstance(extracted, list)
+    assert extracted[0]["round"] == 1
+
+
+def test_process_chat_request_persists_execution_trace_in_history(monkeypatch):
+    db = _FakeSession()
+
+    monkeypatch.setattr(
+        app_module,
+        "_run_scheduler_multi_step",
+        lambda *_args, **_kwargs: {
+            "reply_text": "ok",
+            "results": ["done"],
+            "errors": [],
+            "modified_ids": ["item_custom_1"],
+            "execution_trace": [
+                {
+                    "round": 1,
+                    "actions": [{"type": "create_custom_task", "params": {"name": "歯医者"}}],
+                    "results": ["done"],
+                    "errors": [],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(app_module, "_build_final_reply", lambda *_args, **_kwargs: "保存済み返信")
+
+    result = app_module.process_chat_request(db, "歯医者を追加して", save_history=True)
+
+    assert result["reply"] == "保存済み返信"
+    assistant_history = [
+        item for item in db.added if getattr(item, "role", None) == "assistant"
+    ]
+    assert assistant_history
+    stored_content = assistant_history[-1].content
+    clean, extracted = app_module._extract_execution_trace_from_stored_content(stored_content)
+    assert clean == "保存済み返信"
+    assert extracted and extracted[0]["round"] == 1

@@ -1,4 +1,5 @@
 import calendar
+import base64
 import datetime
 import json
 import os
@@ -153,6 +154,9 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET"])
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+EXEC_TRACE_MARKER_PREFIX = "[[EXEC_TRACE_B64:"
+EXEC_TRACE_MARKER_SUFFIX = "]]"
 
 
 # 日本語: 起動時にDBスキーマを一度だけ作成 / English: Create DB schema once at startup
@@ -665,6 +669,50 @@ def _remove_no_schedule_lines(text: str) -> str:
     cleaned = "\n".join(filtered_lines)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned
+
+
+def _attach_execution_trace_to_stored_content(
+    content: str,
+    execution_trace: List[Dict[str, Any]] | None,
+) -> str:
+    # 日本語: assistant履歴へ実行トレースを埋め込み保存 / English: Embed execution trace into stored assistant content
+    base_content = content if isinstance(content, str) else str(content)
+    trace_items = [item for item in (execution_trace or []) if isinstance(item, dict)]
+    if not trace_items:
+        return base_content
+
+    try:
+        trace_json = json.dumps(trace_items, ensure_ascii=False, sort_keys=True)
+        encoded = base64.b64encode(trace_json.encode("utf-8")).decode("ascii")
+    except Exception:
+        return base_content
+
+    return f"{base_content}\n{EXEC_TRACE_MARKER_PREFIX}{encoded}{EXEC_TRACE_MARKER_SUFFIX}"
+
+
+def _extract_execution_trace_from_stored_content(content: Any) -> tuple[str, List[Dict[str, Any]]]:
+    # 日本語: 保存済みassistant履歴から実行トレースを取り出す / English: Extract execution trace from stored assistant content
+    text = content if isinstance(content, str) else str(content or "")
+    pattern = re.compile(
+        rf"\n?{re.escape(EXEC_TRACE_MARKER_PREFIX)}([A-Za-z0-9+/=]+){re.escape(EXEC_TRACE_MARKER_SUFFIX)}\s*$"
+    )
+    match = pattern.search(text)
+    if not match:
+        return text, []
+
+    body = text[: match.start()].rstrip()
+    encoded = match.group(1)
+    try:
+        decoded = base64.b64decode(encoded.encode("ascii")).decode("utf-8")
+        parsed = json.loads(decoded)
+    except Exception:
+        return body, []
+
+    if not isinstance(parsed, list):
+        return body, []
+
+    trace = [item for item in parsed if isinstance(item, dict)]
+    return body, trace
 
 
 def _get_timeline_data(db: Session, date_obj: datetime.date):
@@ -2497,12 +2545,18 @@ async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
             raise HTTPException(status_code=500, detail=str(e))
 
     history = db.exec(select(ChatHistory).order_by(ChatHistory.timestamp)).all()
-    return {
-        "history": [
-            {"role": h.role, "content": h.content, "timestamp": h.timestamp.isoformat()}
-            for h in history
-        ]
-    }
+    serialized_history = []
+    for h in history:
+        clean_content, execution_trace = _extract_execution_trace_from_stored_content(h.content)
+        serialized_history.append(
+            {
+                "role": h.role,
+                "content": clean_content,
+                "timestamp": h.timestamp.isoformat(),
+                "execution_trace": execution_trace,
+            }
+        )
+    return {"history": serialized_history}
 
 
 # 日本語: LLM 連携の中心処理 / English: Core LLM-driven chat processing
@@ -2541,7 +2595,11 @@ def process_chat_request(
 
     if save_history:
         try:
-            db.add(ChatHistory(role="assistant", content=final_reply))
+            stored_assistant_content = _attach_execution_trace_to_stored_content(
+                final_reply,
+                execution.get("execution_trace", []),
+            )
+            db.add(ChatHistory(role="assistant", content=stored_assistant_content))
             db.commit()
         except Exception as e:
             db.rollback()
