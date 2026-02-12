@@ -47,6 +47,14 @@ const ACTION_LABELS: Record<string, string> = {
   list_tasks_in_period: "期間の予定を確認",
 };
 
+const PROMPT_EXAMPLES = [
+  "明日の10時に『定例会議』を入れて。そのあと11時に『会議の振り返り』というタスクも追加して。",
+  "今日の18時以降にある予定をすべて20時以降にずらして。",
+  "『朝のルーチン』に8時の『ゴミ出し』ステップを追加して。あと、今日のゴミ出しはもう終わったから完了にしておいて。",
+  "新しいルーチン『週末の掃除』を土日に作成して。ステップとして10時に『掃除機がけ』、11時に『お風呂掃除』を追加して。",
+  "今日の日報に『今日は集中して作業できた』と追記して。それから今日のタスクを全部完了にして。",
+];
+
 const trimValue = (value: unknown, max = 24): string => {
   if (typeof value !== "string") return "";
   const text = value.trim();
@@ -102,6 +110,7 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
   const [isPaused, setIsPaused] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [thinkingStepIndex, setThinkingStepIndex] = useState(0);
+  const [showExamples, setShowExamples] = useState(false);
 
   const historyRef = useRef<ChatMessage[]>([]);
   const baseUrlRef = useRef("");
@@ -447,20 +456,78 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
       "form",
       { className: "chat-controller", id: "chatForm", autoComplete: "off", onSubmit: handleSubmit },
       h("label", { htmlFor: "chatInput", className: "sr-only" }, "メッセージを入力"),
+      showExamples &&
+        h(
+          "div",
+          { className: "prompt-examples-popover" },
+          h(
+            "div",
+            { className: "prompt-examples-popover__title" },
+            h("span", null, "💡 複数ステップのタスク例"),
+            h(
+              "button",
+              {
+                type: "button",
+                style: {
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  color: "var(--chat-muted)",
+                },
+                onClick: () => setShowExamples(false),
+              },
+              "×"
+            )
+          ),
+          h(
+            "ul",
+            { className: "prompt-examples-list" },
+            PROMPT_EXAMPLES.map((example, i) =>
+              h(
+                "li",
+                {
+                  key: i,
+                  className: "prompt-example-item",
+                  onClick: () => {
+                    setInputValue(example);
+                    setShowExamples(false);
+                    inputRef.current?.focus();
+                  },
+                },
+                example
+              )
+            )
+          )
+        ),
       h(
         "div",
         { className: "chat-controller__inner" },
-        h("textarea", {
-          id: "chatInput",
-          className: "chat-controller__input",
-          rows: 2,
-          placeholder: "スケジューラーに指示を入力してください。",
-          value: inputValue,
-          onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            setInputValue(e.target.value),
-          disabled: isPaused,
-          ref: inputRef,
-        }),
+        h(
+          "div",
+          { className: "chat-controller__input-container" },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "prompt-example-btn",
+              onClick: () => setShowExamples(!showExamples),
+              title: "プロンプトの例を表示",
+              "aria-label": "プロンプト例",
+            },
+            "i"
+          ),
+          h("textarea", {
+            id: "chatInput",
+            className: "chat-controller__input",
+            rows: 2,
+            placeholder: "スケジューラーに指示を入力してください。",
+            value: inputValue,
+            onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value),
+            disabled: isPaused,
+            ref: inputRef,
+          })
+        ),
         h(
           "div",
           { className: "chat-controller__side" },

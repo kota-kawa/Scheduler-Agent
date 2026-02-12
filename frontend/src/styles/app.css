@@ -631,6 +631,89 @@ body{
     align-items: center;
 }
 
+.prompt-example-btn {
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--chat-accent);
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
+    z-index: 5;
+    transition: all 0.2s ease;
+}
+
+.prompt-example-btn:hover {
+    transform: scale(1.1);
+    background: var(--chat-accent-2);
+}
+
+.prompt-examples-popover {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid rgba(99,102,241,.2);
+    border-radius: 18px;
+    box-shadow: 0 12px 32px rgba(15,23,42,.15);
+    padding: 16px;
+    z-index: 100;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.prompt-examples-popover__title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--chat-text);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.prompt-examples-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.prompt-example-item {
+    background: #f8faff;
+    border: 1px solid rgba(99,102,241,.1);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--chat-text-dim);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+}
+
+.prompt-example-item:hover {
+    background: #eef2ff;
+    border-color: var(--chat-accent);
+    color: var(--chat-text);
+    transform: translateX(4px);
+}
+
 .chat-controller__input{
     width: 100%;
     background: #eef2ff;
@@ -643,6 +726,13 @@ body{
     resize: vertical;
     min-height: 72px;
     max-height: 220px;
+}
+
+.chat-controller__input-container {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
 }
 .chat-controller__input:focus{
     outline: none;
