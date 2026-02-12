@@ -32,7 +32,7 @@ REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         "resolve_schedule_expression",
-        "相対的な日時表現（例: 3日後、来週火曜、2時間後、明日の9時）を絶対日時へ変換します。予定の作成・更新前に必ず使ってください。",
+        "相対的な日時表現（例: 3日後、来週火曜、2時間後、明日の9時）を絶対日時へ変換します。予定の作成・更新前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。",
         {
             "expression": {"type": "string", "description": "変換したい日時表現"},
             "base_date": {

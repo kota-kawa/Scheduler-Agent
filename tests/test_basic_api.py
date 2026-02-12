@@ -173,6 +173,50 @@ def test_run_scheduler_multi_step_stops_duplicate_actions(monkeypatch):
     assert any("重複実行を停止" in err for err in execution["errors"])
 
 
+def test_run_scheduler_multi_step_recovers_from_duplicate_read_only(monkeypatch):
+    db = _FakeSession()
+    llm_calls = {"count": 0}
+
+    llm_sequence = [
+        ("まず計算します。", [{"type": "resolve_schedule_expression", "expression": "明日9時"}]),
+        ("もう一度計算します。", [{"type": "resolve_schedule_expression", "expression": "明日9時"}]),
+        (
+            "追加します。",
+            [{"type": "create_custom_task", "name": "歯医者", "date": "2026-02-13", "time": "09:00"}],
+        ),
+        ("完了です。", []),
+    ]
+
+    def _fake_call_scheduler_llm(_messages, _context):
+        idx = llm_calls["count"]
+        llm_calls["count"] += 1
+        return llm_sequence[idx]
+
+    def _fake_apply_actions(_db, actions, _today):
+        action_type = actions[0].get("type")
+        if action_type == "resolve_schedule_expression":
+            return (["計算結果: expression=明日9時 date=2026-02-13 time=09:00 datetime=2026-02-13T09:00 source=relative_keyword+explicit_time"], [], [])
+        if action_type == "create_custom_task":
+            return (["カスタムタスク「歯医者」(ID: 10) を 2026-02-13 の 09:00 に追加しました。"], [], ["item_custom_10"])
+        return ([], [], [])
+
+    monkeypatch.setattr(app_module, "_build_scheduler_context", lambda *_args, **_kwargs: "ctx")
+    monkeypatch.setattr(app_module, "call_scheduler_llm", _fake_call_scheduler_llm)
+    monkeypatch.setattr(app_module, "_apply_actions", _fake_apply_actions)
+
+    execution = app_module._run_scheduler_multi_step(
+        db,
+        [{"role": "user", "content": "明日9時に歯医者を追加して確認して"}],
+        datetime.date(2026, 2, 12),
+        max_rounds=6,
+    )
+
+    assert any(action.get("type") == "create_custom_task" for action in execution["actions"])
+    assert execution["modified_ids"] == ["item_custom_10"]
+    assert not any("同一アクションが連続して提案" in err for err in execution["errors"])
+    assert any(trace.get("skipped") for trace in execution.get("execution_trace", []))
+
+
 def test_resolve_schedule_expression_helper_relative_date_and_time():
     resolved = app_module._resolve_schedule_expression(
         expression="3日後 14:30",
