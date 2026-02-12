@@ -212,9 +212,56 @@ def test_run_scheduler_multi_step_recovers_from_duplicate_read_only(monkeypatch)
     )
 
     assert any(action.get("type") == "create_custom_task" for action in execution["actions"])
+    assert (
+        sum(
+            1
+            for action in execution["actions"]
+            if action.get("type") == "resolve_schedule_expression"
+        )
+        == 2
+    )
     assert execution["modified_ids"] == ["item_custom_10"]
     assert not any("同一アクションが連続して提案" in err for err in execution["errors"])
-    assert any(trace.get("skipped") for trace in execution.get("execution_trace", []))
+
+
+def test_run_scheduler_multi_step_allows_same_read_only_action_up_to_ten_times(monkeypatch):
+    db = _FakeSession()
+    apply_count = {"value": 0}
+
+    monkeypatch.setattr(app_module, "_build_scheduler_context", lambda *_args, **_kwargs: "ctx")
+    monkeypatch.setattr(
+        app_module,
+        "call_scheduler_llm",
+        lambda *_args, **_kwargs: (
+            "同じ計算を続けます。",
+            [{"type": "resolve_schedule_expression", "expression": "明日9時"}],
+        ),
+    )
+
+    def _fake_apply_actions(_db, actions, _today):
+        apply_count["value"] += 1
+        assert actions[0].get("type") == "resolve_schedule_expression"
+        return (["計算結果: expression=明日9時 date=2026-02-13 time=09:00 datetime=2026-02-13T09:00"], [], [])
+
+    monkeypatch.setattr(app_module, "_apply_actions", _fake_apply_actions)
+
+    execution = app_module._run_scheduler_multi_step(
+        db,
+        [{"role": "user", "content": "明日9時を繰り返し計算して"}],
+        datetime.date(2026, 2, 12),
+        max_rounds=12,
+    )
+
+    assert apply_count["value"] == 10
+    assert (
+        sum(
+            1
+            for action in execution["actions"]
+            if action.get("type") == "resolve_schedule_expression"
+        )
+        == 10
+    )
+    assert any("同じ参照/計算アクションが10回連続" in err for err in execution["errors"])
 
 
 def test_resolve_schedule_expression_helper_relative_date_and_time():

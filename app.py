@@ -1384,6 +1384,16 @@ def _get_max_action_rounds() -> int:
     return max(1, min(parsed, 10))
 
 
+def _get_max_same_read_action_streak() -> int:
+    # 日本語: 同一の参照/計算アクション連続許可回数 / English: Max consecutive same read/calc actions
+    raw_value = os.getenv("SCHEDULER_MAX_SAME_READ_ACTION_STREAK", "10")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 10
+    return max(1, min(parsed, 10))
+
+
 READ_ONLY_ACTION_TYPES = {
     "resolve_schedule_expression",
     "get_day_log",
@@ -1639,6 +1649,7 @@ def _run_scheduler_multi_step(
     no_progress_rounds = 0
     completed_steps = 0
     executed_write_fingerprints: set[str] = set()
+    max_same_read_action_streak = _get_max_same_read_action_streak()
 
     if inferred_steps:
         planning_message = (
@@ -1674,56 +1685,17 @@ def _run_scheduler_multi_step(
         if signature and signature == previous_signature:
             if all_read_only and not previous_round_had_write:
                 stale_read_repeat_count += 1
-                duplicate_warning = (
-                    "同じ参照/計算アクションが連続しました。"
-                    " 次は next_expected_step に沿って別アクションを実行してください。"
-                )
-                trace_actions = []
-                for action in current_actions:
-                    action_type = action.get("type") if isinstance(action, dict) else None
-                    params = {}
-                    if isinstance(action, dict):
-                        params = {k: v for k, v in action.items() if k != "type"}
-                    trace_actions.append(
-                        {
-                            "type": str(action_type or "unknown"),
-                            "params": params,
-                        }
+                if stale_read_repeat_count >= max_same_read_action_streak:
+                    all_errors.append(
+                        f"同じ参照/計算アクションが{max_same_read_action_streak}回連続したため処理を終了しました。"
                     )
-                execution_trace.append(
-                    {
-                        "round": round_index,
-                        "actions": trace_actions,
-                        "results": [],
-                        "errors": [duplicate_warning],
-                        "skipped": True,
-                    }
-                )
-                feedback = _build_round_feedback(
-                    round_index,
-                    current_actions,
-                    [],
-                    [],
-                    inferred_steps=inferred_steps,
-                    completed_steps=completed_steps,
-                    resolved_memory=resolved_memory,
-                    duplicate_warning=duplicate_warning,
-                )
-                assistant_feedback = reply_text.strip() or "了解しました。"
-                working_messages = [
-                    *working_messages,
-                    {"role": "assistant", "content": assistant_feedback},
-                    {"role": "system", "content": feedback},
-                ]
-                if stale_read_repeat_count >= 2:
-                    all_errors.append("同じ参照/計算アクションが続いたため処理を終了しました。")
                     break
-                continue
+            else:
+                all_errors.append("同一アクションが連続して提案されたため、重複実行を停止しました。")
+                break
+        else:
+            stale_read_repeat_count = 0
 
-            all_errors.append("同一アクションが連続して提案されたため、重複実行を停止しました。")
-            break
-
-        stale_read_repeat_count = 0
         previous_signature = signature
 
         actions_to_execute: List[Dict[str, Any]] = []
@@ -1891,6 +1863,7 @@ def _is_internal_system_error(error_text: str) -> bool:
     internal_markers = [
         "同一アクションが連続して提案されたため、重複実行を停止しました。",
         "同じ参照/計算アクションが続いたため処理を終了しました。",
+        "同じ参照/計算アクションが10回連続したため処理を終了しました。",
         "進捗が得られない状態が続いたため処理を終了しました。",
         "複数ステップ実行の上限",
         "同一の更新アクションが再提案されたため再実行をスキップしました。",
