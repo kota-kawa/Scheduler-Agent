@@ -508,6 +508,44 @@ body{
     word-break: break-word;
     color: var(--chat-text);
 }
+.message__text{
+    white-space: pre-wrap;
+}
+.message-exec-log{
+    margin: 0 0 10px;
+    border: 1px dashed rgba(79,70,229,.28);
+    border-radius: 10px;
+    background: rgba(238,242,255,.75);
+}
+.message-exec-log__summary{
+    cursor: pointer;
+    list-style: none;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--chat-text-dim);
+}
+.message-exec-log__summary::-webkit-details-marker{
+    display: none;
+}
+.message-exec-log__summary::before{
+    content: "▶";
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform .2s ease;
+    color: var(--chat-accent);
+}
+.message-exec-log[open] .message-exec-log__summary::before{
+    transform: rotate(90deg);
+}
+.message-exec-log__body{
+    margin: 0;
+    padding: 0 10px 10px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--chat-text-dim);
+    white-space: pre-wrap;
+}
 .message--user .message__bubble{
     background: linear-gradient(180deg, #e2e8ff, #d9dcff);
     border-color: rgba(99,102,241,.35);

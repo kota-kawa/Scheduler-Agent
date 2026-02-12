@@ -4,6 +4,7 @@ export interface ChatDisplayMessage {
   role: ChatRole;
   content: string;
   timeDisplay: string;
+  executionLog?: string;
 }
 
 export interface ModelSelectionOption extends ModelOption {

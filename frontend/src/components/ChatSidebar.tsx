@@ -70,7 +70,7 @@ const describeAction = (action: ChatExecutionAction): string => {
 const buildExecutionTraceSummary = (trace?: ChatExecutionTrace[]): string => {
   if (!Array.isArray(trace) || trace.length === 0) return "";
 
-  const lines: string[] = ["実行ログ（自動処理）"];
+  const lines: string[] = [];
   let index = 1;
   for (const round of trace) {
     if (!round || !Array.isArray(round.actions)) continue;
@@ -82,7 +82,7 @@ const buildExecutionTraceSummary = (trace?: ChatExecutionTrace[]): string => {
       lines.push(`- 注意: ${round.errors[0]}`);
     }
   }
-  return lines.length > 1 ? lines.join("\n") : "";
+  return lines.length > 0 ? lines.join("\n") : "";
 };
 
 interface ChatSidebarProps {
@@ -115,17 +115,28 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
   }, [modelOptions]);
 
   // 日本語: 表示用メッセージの追加 / English: Append a display message
+  type AppendMessageOptions = {
+    timestamp?: string;
+    persistToHistory?: boolean;
+    executionLog?: string;
+  };
+
   const appendMessage = (
     role: ChatMessage["role"],
     content: string,
-    timestamp?: string,
-    persistToHistory = true
+    options?: AppendMessageOptions
   ) => {
+    const timestamp = options?.timestamp;
+    const persistToHistory = options?.persistToHistory ?? true;
+    const executionLog = typeof options?.executionLog === "string" ? options.executionLog.trim() : "";
     const timeDisplay = timestamp || nowTime();
     if (persistToHistory) {
       historyRef.current = [...historyRef.current, { role, content }];
     }
-    setMessages((prev) => [...prev, { role, content, timeDisplay }]);
+    setMessages((prev) => [
+      ...prev,
+      { role, content, timeDisplay, executionLog: executionLog || undefined },
+    ]);
   };
 
   // 日本語: サーバーの履歴を復元 / English: Load chat history from server
@@ -238,17 +249,18 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
     try {
       const data = await requestAssistantResponse();
       const executionSummary = buildExecutionTraceSummary(data.execution_trace);
-      if (executionSummary) {
-        appendMessage("assistant", executionSummary, undefined, false);
-      }
       const reply = typeof data.reply === "string" ? data.reply : "";
       const cleanReply = reply && reply.trim();
 
       if (cleanReply) {
-        appendMessage("assistant", cleanReply);
+        appendMessage("assistant", cleanReply, { executionLog: executionSummary });
       } else if (data.should_refresh) {
         // 日本語: アクション実行時は返信が空でも「了解しました。」を表示 / English: Show confirmation if action was taken
-        appendMessage("assistant", "了解しました。");
+        appendMessage("assistant", "了解しました。", { executionLog: executionSummary });
+      } else if (executionSummary) {
+        appendMessage("assistant", "処理内容を実行ログにまとめました。", {
+          executionLog: executionSummary,
+        });
       }
 
       if (data.should_refresh && onRefresh) {
@@ -374,7 +386,19 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
             h(
               "div",
               null,
-              h("div", { className: "message__bubble" }, msg.content),
+              h(
+                "div",
+                { className: "message__bubble" },
+                msg.executionLog
+                  ? h(
+                      "details",
+                      { className: "message-exec-log" },
+                      h("summary", { className: "message-exec-log__summary" }, "実行ログ（自動処理）"),
+                      h("pre", { className: "message-exec-log__body" }, msg.executionLog)
+                    )
+                  : null,
+                h("div", { className: "message__text" }, msg.content)
+              ),
               h(
                 "div",
                 { className: "message__meta" },
