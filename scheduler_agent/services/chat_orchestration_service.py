@@ -29,6 +29,29 @@ from scheduler_agent.services.schedule_parser_service import (
 from scheduler_agent.services.timeline_service import _build_scheduler_context
 
 
+_REFERENCE_DATE_TOKENS = (
+    "その",
+    "それ",
+    "同日",
+    "当日",
+    "同じ日",
+    "その日",
+    "翌日",
+    "翌々日",
+    "前日",
+    "前々日",
+)
+
+
+def _has_reference_date_token(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text:
+        return False
+    return any(token in text for token in _REFERENCE_DATE_TOKENS)
+
+
 def _action_signature(actions: List[Dict[str, Any]]) -> str:
     signatures: List[str] = []
     for action in actions:
@@ -146,6 +169,61 @@ def _normalize_actions_for_week_scope_confirmation(
             continue
 
         normalized.append(action)
+
+    return normalized
+
+
+def _inject_base_date_for_reference_resolves(
+    actions: List[Dict[str, Any]],
+    resolved_memory: List[Dict[str, str]],
+) -> List[Dict[str, Any]]:
+    last_resolved_date: datetime.date | None = None
+    for item in reversed(resolved_memory or []):
+        if not isinstance(item, dict):
+            continue
+        parsed = _try_parse_iso_date(item.get("date"))
+        if parsed is not None:
+            last_resolved_date = parsed
+            break
+
+    if last_resolved_date is None:
+        return actions
+
+    normalized: List[Dict[str, Any]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            normalized.append(action)
+            continue
+        if str(action.get("type", "")) != "resolve_schedule_expression":
+            normalized.append(action)
+            continue
+        expression = action.get("expression")
+        if not _has_reference_date_token(expression):
+            normalized.append(action)
+            continue
+        base_date_value = action.get("base_date")
+        if _try_parse_iso_date(base_date_value) is not None:
+            normalized.append(action)
+            continue
+
+        updated = dict(action)
+        updated["base_date"] = last_resolved_date.isoformat()
+        normalized.append(updated)
+
+        fallback_base_time = datetime.datetime.now().strftime("%H:%M")
+        base_time_value = _normalize_hhmm(updated.get("base_time"), fallback_base_time)
+        default_time_value = _normalize_hhmm(updated.get("default_time"), base_time_value)
+        calc = _resolve_schedule_expression(
+            expression=str(expression or ""),
+            base_date=last_resolved_date,
+            base_time=base_time_value,
+            default_time=default_time_value,
+        )
+        if not calc.get("ok"):
+            continue
+        resolved_date = _try_parse_iso_date(calc.get("date"))
+        if resolved_date is not None:
+            last_resolved_date = resolved_date
 
     return normalized
 
@@ -322,6 +400,8 @@ def _build_round_feedback(
         "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
         "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
         "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は resolve_schedule_expression を先に実行してから参照/更新ツールを呼んでください。\n"
+        "resolve_schedule_expression が「日付表現を解釈できませんでした」を返した場合は、同じ expression を繰り返さず、記念日名や曖昧語を具体的な月日/ISO日付へ言い換えて再計算してください。\n"
+        "「その3日後」「その翌日」など参照語つき日時は、resolved_datetime_memory の直近 date を base_date に設定して計算してください。\n"
         "直前と同じ参照/計算アクションを繰り返さず、next_expected_step を優先してください。\n"
         "同じ作成・更新系のアクションを重複して実行しないでください。"
     )
@@ -376,6 +456,7 @@ def _run_scheduler_multi_step(
 
         current_actions = [a for a in actions if isinstance(a, dict)] if isinstance(actions, list) else []
         current_actions = _normalize_actions_for_week_scope_confirmation(current_actions, user_message)
+        current_actions = _inject_base_date_for_reference_resolves(current_actions, resolved_memory)
         if not current_actions:
             break
 
