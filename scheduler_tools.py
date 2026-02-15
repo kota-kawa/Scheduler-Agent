@@ -32,7 +32,7 @@ REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
         "resolve_schedule_expression",
-        "日時表現（例: 3日後、来週火曜、2時間後、明日の9時、2026-03-01、3/1、金曜日）を絶対日時へ変換します。today_date 以外の日付を扱う参照/更新の前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。週のみ指定（例: 来週）では date はその週の月曜日になり、週範囲（period_start/period_end）も返ります。",
+        "日時表現（例: 3日後、来週火曜、2時間後、明日の9時、2026-03-01、3/1、金曜日）を絶対日時へ変換します。today_date 以外の日付を扱う参照/更新の前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。記念日名を含む場合（例: 来月のホワイトデー）は、モデル側で「3月14日」などの具体日付に解釈して expression に渡してください。「その3日後」のような参照は、直前に解決した日付を base_date に指定してください。週のみ指定（例: 来週）では date はその週の月曜日になり、週範囲（period_start/period_end）も返ります。",
         {
             "expression": {"type": "string", "description": "変換したい日時表現"},
             "base_date": {

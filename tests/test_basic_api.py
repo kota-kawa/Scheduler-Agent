@@ -460,3 +460,175 @@ def test_process_chat_request_persists_execution_trace_in_history(monkeypatch):
     clean, extracted = app_module._extract_execution_trace_from_stored_content(stored_content)
     assert clean == "保存済み返信"
     assert extracted and extracted[0]["round"] == 1
+
+
+def test_run_scheduler_multi_step_feedback_guides_event_name_resolution(monkeypatch):
+    db = _FakeSession()
+    llm_calls = {"count": 0}
+    recorded_messages = []
+
+    llm_sequence = [
+        ("まず計算します。", [{"type": "resolve_schedule_expression", "expression": "来月のホワイトデー"}]),
+        ("了解です。", []),
+    ]
+
+    def _fake_call_scheduler_llm(messages, _context):
+        recorded_messages.append(list(messages))
+        idx = llm_calls["count"]
+        llm_calls["count"] += 1
+        return llm_sequence[idx]
+
+    def _fake_apply_actions(_db, actions, _today):
+        assert actions[0].get("type") == "resolve_schedule_expression"
+        return (
+            [],
+            ["resolve_schedule_expression: 日付表現を解釈できませんでした: 来月のホワイトデー"],
+            [],
+        )
+
+    monkeypatch.setattr(app_module, "_build_scheduler_context", lambda *_args, **_kwargs: "ctx")
+    monkeypatch.setattr(app_module, "call_scheduler_llm", _fake_call_scheduler_llm)
+    monkeypatch.setattr(app_module, "_apply_actions", _fake_apply_actions)
+
+    app_module._run_scheduler_multi_step(
+        db,
+        [{"role": "user", "content": "来月のホワイトデーとその3日後に予定を入れて"}],
+        datetime.date(2026, 2, 15),
+        max_rounds=2,
+    )
+
+    assert len(recorded_messages) == 2
+    second_round_system = [
+        msg.get("content", "") for msg in recorded_messages[1] if msg.get("role") == "system"
+    ]
+    merged = "\n".join(second_round_system)
+    assert "記念日名や曖昧語を具体的な月日/ISO日付へ言い換えて再計算してください。" in merged
+    assert "「その3日後」「その翌日」など参照語つき日時は" in merged
+
+
+def test_apply_actions_resolve_schedule_expression_uses_llm_normalization_fallback(monkeypatch):
+    db = _FakeSession()
+    actions = [
+        {
+            "type": "resolve_schedule_expression",
+            "expression": "来月のホワイトデー",
+            "base_date": "2026-02-15",
+            "default_time": "09:00",
+        }
+    ]
+
+    monkeypatch.setattr(
+        app_module.action_service_module,
+        "_normalize_schedule_expression_with_llm",
+        lambda **_kwargs: ("2026-03-14", None),
+    )
+
+    results, errors, modified = app_module._apply_actions(
+        db,
+        actions,
+        datetime.date(2026, 2, 15),
+    )
+
+    assert not errors
+    assert modified == []
+    assert any("date=2026-03-14" in line for line in results)
+
+
+def test_apply_actions_resolve_schedule_expression_uses_previous_resolved_date_for_reference():
+    db = _FakeSession()
+    actions = [
+        {
+            "type": "resolve_schedule_expression",
+            "expression": "2026-03-14",
+            "default_time": "10:00",
+        },
+        {
+            "type": "resolve_schedule_expression",
+            "expression": "その3日後",
+            "default_time": "10:00",
+        },
+    ]
+
+    results, errors, modified = app_module._apply_actions(
+        db,
+        actions,
+        datetime.date(2026, 2, 15),
+    )
+
+    assert not errors
+    assert modified == []
+    assert any("expression=その3日後" in line and "date=2026-03-17" in line for line in results)
+
+
+def test_build_final_reply_passes_model_argument_to_summary_client(monkeypatch):
+    class _AssertModelClient:
+        def __init__(self):
+            self.model_name = "dummy-model"
+
+        def create(self, **kwargs):
+            assert kwargs.get("model") == "dummy-model"
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="最終返信です。"))]
+            )
+
+    monkeypatch.setattr(app_module, "UnifiedClient", _AssertModelClient)
+
+    reply = app_module._build_final_reply(
+        user_message="予定を入れて",
+        reply_text="",
+        results=["カスタムタスク「テスト」(ID: 1) を 2026-03-14 の 09:00 に追加しました。"],
+        errors=[],
+    )
+
+    assert "最終返信です。" in reply
+
+
+def test_run_scheduler_multi_step_injects_reference_base_date_from_memory(monkeypatch):
+    db = _FakeSession()
+    llm_calls = {"count": 0}
+    captured_base_dates = []
+
+    llm_sequence = [
+        ("まず計算します。", [{"type": "resolve_schedule_expression", "expression": "2026-03-14"}]),
+        ("次を計算します。", [{"type": "resolve_schedule_expression", "expression": "その3日後"}]),
+        ("完了です。", []),
+    ]
+
+    def _fake_call_scheduler_llm(_messages, _context):
+        idx = llm_calls["count"]
+        llm_calls["count"] += 1
+        return llm_sequence[idx]
+
+    def _fake_apply_actions(_db, actions, _today):
+        first = actions[0]
+        if first.get("expression") == "2026-03-14":
+            return (
+                [
+                    "計算結果: expression=2026-03-14 date=2026-03-14 time=09:00 datetime=2026-03-14T09:00 source=explicit_date"
+                ],
+                [],
+                [],
+            )
+        if first.get("expression") == "その3日後":
+            captured_base_dates.append(first.get("base_date"))
+            return (
+                [
+                    "計算結果: expression=その3日後 date=2026-03-17 time=09:00 datetime=2026-03-17T09:00 source=relative_day"
+                ],
+                [],
+                [],
+            )
+        return ([], [], [])
+
+    monkeypatch.setattr(app_module, "_build_scheduler_context", lambda *_args, **_kwargs: "ctx")
+    monkeypatch.setattr(app_module, "call_scheduler_llm", _fake_call_scheduler_llm)
+    monkeypatch.setattr(app_module, "_apply_actions", _fake_apply_actions)
+
+    app_module._run_scheduler_multi_step(
+        db,
+        [{"role": "user", "content": "3/14とその3日後を計算して"}],
+        datetime.date(2026, 2, 15),
+        max_rounds=4,
+    )
+
+    assert captured_base_dates == ["2026-03-14"]

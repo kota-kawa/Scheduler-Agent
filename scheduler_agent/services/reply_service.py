@@ -213,7 +213,12 @@ def _build_final_reply(
     ]
 
     try:
-        resp = summary_client.create(messages=summary_messages, temperature=0.7, max_tokens=1000)
+        resp = summary_client.create(
+            model=summary_client.model_name,
+            messages=summary_messages,
+            temperature=0.7,
+            max_tokens=1000,
+        )
         final_reply = _content_to_text(resp.choices[0].message.content)
         if _looks_mechanical_reply(final_reply):
             final_reply = _build_pop_friendly_reply(user_message, results, errors)
