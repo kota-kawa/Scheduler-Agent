@@ -43,6 +43,88 @@ _REFERENCE_DATE_TOKENS = (
 )
 
 
+_DELETE_ALL_ROUTINE_TOKENS = {
+    "all",
+    "allroutine",
+    "allroutines",
+    "全部",
+    "すべて",
+    "全て",
+    "全件",
+    "全ルーチン",
+    "全ルーティン",
+    "すべてのルーチン",
+    "すべてのルーティン",
+    "全部のルーチン",
+    "全部のルーティン",
+}
+
+_ROUTINE_NAME_SUFFIXES = ("ルーチン", "ルーティン", "routine", "routines")
+
+
+def _normalize_routine_name_key(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = value.strip().strip("「」『』\"'`")
+    text = text.replace("　", " ")
+    return re.sub(r"\s+", "", text).casefold()
+
+
+def _routine_name_candidates(value: Any) -> List[str]:
+    base = _normalize_routine_name_key(value)
+    if not base:
+        return []
+    candidates = {base}
+    for suffix in _ROUTINE_NAME_SUFFIXES:
+        if base.endswith(suffix) and len(base) > len(suffix):
+            candidates.add(base[: -len(suffix)])
+        suffix_with_no = f"の{suffix}"
+        if base.endswith(suffix_with_no) and len(base) > len(suffix_with_no):
+            candidates.add(base[: -len(suffix_with_no)])
+    return [item for item in candidates if item]
+
+
+def _is_delete_all_routine_request(action: Dict[str, Any], routine_name: Any) -> bool:
+    if _bool_from_value(action.get("all"), False):
+        return True
+    scope_key = _normalize_routine_name_key(action.get("scope"))
+    if scope_key and scope_key in _DELETE_ALL_ROUTINE_TOKENS:
+        return True
+    name_key = _normalize_routine_name_key(routine_name)
+    return bool(name_key and name_key in _DELETE_ALL_ROUTINE_TOKENS)
+
+
+def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple[List[Routine], str]:
+    candidates = _routine_name_candidates(routine_name)
+    if not candidates:
+        return [], "none"
+
+    normalized_pairs = [
+        (routine, _normalize_routine_name_key(getattr(routine, "name", "")))
+        for routine in routines
+    ]
+
+    exact_by_id: Dict[int, Routine] = {}
+    for candidate in candidates:
+        for routine, name_key in normalized_pairs:
+            if name_key == candidate:
+                exact_by_id[routine.id] = routine
+    exact_matches = list(exact_by_id.values())
+    if exact_matches:
+        return exact_matches, "exact"
+
+    partial_by_id: Dict[int, Routine] = {}
+    for candidate in candidates:
+        for routine, name_key in normalized_pairs:
+            if candidate and candidate in name_key:
+                partial_by_id[routine.id] = routine
+    partial_matches = list(partial_by_id.values())
+    if partial_matches:
+        return partial_matches, "partial"
+
+    return [], "none"
+
+
 def _has_reference_date_token(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -506,13 +588,71 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
             if action_type == "delete_routine":
                 rid = action.get("routine_id")
-                routine = db.get(Routine, int(rid)) if rid else None
-                if routine:
-                    db.delete(routine)
-                    results.append(f"ルーチン「{routine.name}」を削除しました。")
+                routine_name = action.get("routine_name")
+                delete_all = _is_delete_all_routine_request(action, routine_name)
+
+                if rid is not None and str(rid).strip() != "":
+                    try:
+                        routine_id_int = int(rid)
+                    except (TypeError, ValueError):
+                        errors.append("delete_routine: routine_id が不正です。")
+                        continue
+                    routine_obj = db.get(Routine, routine_id_int)
+                    if not routine_obj:
+                        errors.append(f"routine_id={routine_id_int} が見つかりませんでした。")
+                        continue
+                    db.delete(routine_obj)
+                    results.append(f"ルーチン「{routine_obj.name}」を削除しました。")
                     dirty = True
+                    continue
+
+                routines = db.exec(select(Routine)).all()
+
+                if delete_all:
+                    if not routines:
+                        results.append("削除対象のルーチンはありませんでした。")
+                        continue
+                    deleted_count = 0
+                    for routine_obj in routines:
+                        db.delete(routine_obj)
+                        deleted_count += 1
+                    results.append(f"ルーチンを{deleted_count}件削除しました。")
+                    dirty = True
+                    continue
+
+                if not isinstance(routine_name, str) or not routine_name.strip():
+                    errors.append(
+                        "delete_routine: routine_id / routine_name / scope=all のいずれかを指定してください。"
+                    )
+                    continue
+
+                matched_routines, match_mode = _match_routines_by_name(routines, routine_name)
+                if not matched_routines:
+                    errors.append(
+                        f"delete_routine: routine_name='{routine_name.strip()}' に一致するルーチンが見つかりませんでした。"
+                    )
+                    continue
+
+                if match_mode != "exact" and len(matched_routines) > 1:
+                    candidates = "、".join(
+                        f"{item.name}(ID:{item.id})" for item in matched_routines[:5]
+                    )
+                    errors.append(
+                        "delete_routine: routine_name に一致するルーチンが複数あります。"
+                        f" 候補: {candidates}。routine_id またはより具体的な routine_name を指定してください。"
+                    )
+                    continue
+
+                for routine_obj in matched_routines:
+                    db.delete(routine_obj)
+                deleted_count = len(matched_routines)
+                if deleted_count == 1:
+                    results.append(f"ルーチン「{matched_routines[0].name}」を削除しました。")
                 else:
-                    errors.append("delete_routine: not found")
+                    results.append(
+                        f"ルーチン名「{routine_name.strip()}」に一致した {deleted_count} 件を削除しました。"
+                    )
+                dirty = True
                 continue
 
             if action_type == "update_routine_days":

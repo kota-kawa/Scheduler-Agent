@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import app as app_module
+import scheduler_tools
 
 
 class _ExecResult:
@@ -50,6 +51,43 @@ class _FakeRequest:
         return self._payload
 
 
+class _RoutineObj:
+    def __init__(self, item_id, name):
+        self.id = item_id
+        self.name = name
+
+
+class _RoutineDeleteSession:
+    def __init__(self, routines):
+        self._routines = list(routines)
+        self.commit_called = False
+
+    def exec(self, *_args, **_kwargs):
+        return _ExecResult(self._routines)
+
+    def get(self, _model, item_id):
+        for routine in self._routines:
+            if routine.id == item_id:
+                return routine
+        return None
+
+    def delete(self, obj):
+        self._routines = [item for item in self._routines if item.id != obj.id]
+
+    def add(self, _obj):
+        return None
+
+    def commit(self):
+        self.commit_called = True
+        return None
+
+    def rollback(self):
+        return None
+
+    def flush(self):
+        return None
+
+
 @pytest.fixture()
 def fake_db(monkeypatch):
     monkeypatch.setattr(app_module, "call_scheduler_llm", lambda *_args, **_kwargs: ("ok", []))
@@ -61,6 +99,56 @@ def fake_db(monkeypatch):
     )
     monkeypatch.setattr(app_module, "delete", lambda *_args, **_kwargs: object())
     return _FakeSession()
+
+
+def test_delete_routine_tool_allows_name_and_all_scope():
+    delete_tool = next(
+        item for item in scheduler_tools.SCHEDULER_TOOLS if item["function"]["name"] == "delete_routine"
+    )
+    params = delete_tool["function"]["parameters"]
+    assert "routine_id" in params["properties"]
+    assert "routine_name" in params["properties"]
+    assert "scope" in params["properties"]
+    assert "all" in params["properties"]
+    assert "routine_id" not in params.get("required", [])
+
+
+def test_apply_actions_delete_routine_by_name():
+    db = _RoutineDeleteSession([_RoutineObj(1, "朝ルーチン"), _RoutineObj(2, "夜ルーチン")])
+    results, errors, _ = app_module._apply_actions(
+        db,
+        [{"type": "delete_routine", "routine_name": "朝ルーチン"}],
+        datetime.date(2026, 2, 15),
+    )
+    assert not errors
+    assert any("朝ルーチン" in line for line in results)
+    assert [item.name for item in db._routines] == ["夜ルーチン"]
+    assert db.commit_called is True
+
+
+def test_apply_actions_delete_routine_all_scope():
+    db = _RoutineDeleteSession([_RoutineObj(1, "A"), _RoutineObj(2, "B"), _RoutineObj(3, "C")])
+    results, errors, _ = app_module._apply_actions(
+        db,
+        [{"type": "delete_routine", "scope": "all"}],
+        datetime.date(2026, 2, 15),
+    )
+    assert not errors
+    assert any("3件" in line for line in results)
+    assert db._routines == []
+    assert db.commit_called is True
+
+
+def test_apply_actions_delete_routine_rejects_ambiguous_partial_name():
+    db = _RoutineDeleteSession([_RoutineObj(1, "朝散歩"), _RoutineObj(2, "朝読書")])
+    results, errors, _ = app_module._apply_actions(
+        db,
+        [{"type": "delete_routine", "routine_name": "朝"}],
+        datetime.date(2026, 2, 15),
+    )
+    assert results == []
+    assert any("複数" in err for err in errors)
+    assert len(db._routines) == 2
 
 
 def test_chat_endpoint_basic(fake_db):
