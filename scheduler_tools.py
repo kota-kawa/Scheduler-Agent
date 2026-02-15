@@ -150,9 +150,16 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "delete_routine",
-        "指定IDのルーチンを削除します。",
-        {"routine_id": {"type": "integer", "description": "ルーチンID"}},
-        required=["routine_id"],
+        "ルーチンを削除します。routine_id がある場合はそれを優先します。IDが不明な場合は routine_name で削除できます。「すべて」「全部」など全件削除の指示は scope='all' または all=true を指定してください。",
+        {
+            "routine_id": {"type": "integer", "description": "ルーチンID（分かる場合は最優先）"},
+            "routine_name": {"type": "string", "description": "ルーチン名（ID不明時に使用）"},
+            "scope": {
+                "type": "string",
+                "description": "削除範囲。全件削除は 'all'。通常は省略",
+            },
+            "all": {"type": "boolean", "description": "true の場合はルーチンを全件削除"},
+        },
     ),
     _build_tool(
         "update_routine_days",
