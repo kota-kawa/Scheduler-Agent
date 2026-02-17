@@ -2,6 +2,8 @@
 
 <img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
 
+## UI Preview
+
 <p align="center">
   <img src="assets/images/Scheduler-Agent-Screenshot.png" alt="Scheduler Agent Screenshot" width="1100">
 </p>
@@ -66,6 +68,12 @@ This project is released under the [MIT License](LICENSE.md).
 <summary>日本語版（クリックして開く）</summary>
 
 ## 👋 はじめに
+
+### UI Preview
+
+<p align="center">
+  <img src="assets/images/Scheduler-Agent-Screenshot.png" alt="Scheduler Agent スクリーンショット" width="1100">
+</p>
 
 **Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
 「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
