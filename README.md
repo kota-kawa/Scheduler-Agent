@@ -8,6 +8,14 @@
   <img src="assets/images/Scheduler-Agent-Screenshot.png" alt="Scheduler Agent Screenshot" width="1100">
 </p>
 
+## 🎬 Demo Videos
+
+Click a thumbnail to open the video on YouTube.
+
+| [![Demo Video 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![Demo Video 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![Demo Video 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
+| --- | --- | --- |
+| Demo Video 1 | Demo Video 2 | Demo Video 3 |
+
 ## Welcome
 
 **Scheduler Agent** is an AI-powered scheduling assistant that helps you manage routines and one-off tasks through a simple chat experience. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized.
@@ -74,6 +82,14 @@ This project is released under the [MIT License](LICENSE.md).
 <p align="center">
   <img src="assets/images/Scheduler-Agent-Screenshot.png" alt="Scheduler Agent スクリーンショット" width="1100">
 </p>
+
+## 🎬 デモ動画
+
+サムネイルをクリックするとYouTubeで開きます。
+
+| [![デモ動画 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![デモ動画 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![デモ動画 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
+| --- | --- | --- |
+| デモ動画 1 | デモ動画 2 | デモ動画 3 |
 
 **Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
 「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
