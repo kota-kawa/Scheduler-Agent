@@ -29,7 +29,7 @@ Click a thumbnail to open the video on YouTube.
 
 | [![Demo Video 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![Demo Video 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![Demo Video 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
 | --- | --- | --- |
-| Demo Video 1: Schedule lunch for next Wednesday and Friday | Demo Video 2: Check next week's schedule, then create a gym routine for next Wednesday | Demo Video 3: Reschedule the gym routine to Saturday |
+| Schedule lunch for next Wednesday and Friday | Check next week's schedule, then create a gym routine for next Wednesday | Reschedule the gym routine to Saturday |
 
 ## Welcome
 
@@ -104,7 +104,7 @@ This project is released under the [MIT License](LICENSE.md).
 
 | [![デモ動画 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![デモ動画 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![デモ動画 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
 | --- | --- | --- |
-| デモ動画 1: 来週の水曜日と金曜日にランチの予定を入れる | デモ動画 2: 来週の予定を確認した後、来週水曜日にジムに行くルーティンを作成する | デモ動画 3: ジムに行くルーティンを土曜日に変更する |
+| 来週の水曜日と金曜日にランチの予定を入れる | 来週の予定を確認した後、来週水曜日にジムに行くルーティンを作成する | ジムに行くルーティンを土曜日に変更する |
 
 **Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
 「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
