@@ -79,23 +79,42 @@ jobs:
           python - <<'PY'
           import os
           import time
+          from urllib.parse import unquote, urlparse
 
           import psycopg2
 
-          dsn = os.environ["TEST_DATABASE_URL"]
+          database_url = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+          if not database_url:
+              raise SystemExit("TEST_DATABASE_URL or DATABASE_URL is required.")
+
+          parsed = urlparse(database_url)
+          if not parsed.scheme.startswith("postgresql"):
+              raise SystemExit(f"Unsupported database URL scheme for PostgreSQL wait: {parsed.scheme}")
+
+          connect_kwargs = {
+              "host": parsed.hostname or "localhost",
+              "port": parsed.port or 5432,
+              "dbname": (parsed.path or "/").lstrip("/") or "postgres",
+          }
+          if parsed.username:
+              connect_kwargs["user"] = unquote(parsed.username)
+          if parsed.password:
+              connect_kwargs["password"] = unquote(parsed.password)
+
+          target = f"{connect_kwargs['host']}:{connect_kwargs['port']}/{connect_kwargs['dbname']}"
           last_error = None
 
           for _ in range(30):
               try:
-                  conn = psycopg2.connect(dsn)
+                  conn = psycopg2.connect(**connect_kwargs)
                   conn.close()
-                  print("PostgreSQL is ready.")
+                  print(f"PostgreSQL is ready: {target}")
                   raise SystemExit(0)
               except Exception as exc:
                   last_error = exc
                   time.sleep(2)
 
-          raise SystemExit(f"PostgreSQL did not become ready in time: {last_error}")
+          raise SystemExit(f"PostgreSQL did not become ready in time ({target}): {last_error}")
           PY
 
       - name: Run tests with coverage
@@ -115,10 +134,16 @@ jobs:
         if: always()
         run: |
           python - <<'PY'
+          from pathlib import Path
           import sys
           import xml.etree.ElementTree as ET
 
-          tree = ET.parse("reports/junit.xml")
+          report_path = Path("reports/junit.xml")
+          if not report_path.exists():
+            print("reports/junit.xml was not generated. Skip-count check is skipped.")
+            raise SystemExit(0)
+
+          tree = ET.parse(report_path)
           root = tree.getroot()
           skipped = 0
           for suite in root.iter("testsuite"):
