@@ -313,6 +313,8 @@ def _resolve_schedule_expression(
         base_date, datetime.time(hour=base_hour, minute=base_minute)
     )
 
+    weekday_names_ja = ["月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"]
+
     relative_time_delta = _extract_relative_time_delta(text)
     if relative_time_delta is not None:
         resolved_datetime = base_datetime + relative_time_delta
@@ -321,6 +323,7 @@ def _resolve_schedule_expression(
             "date": resolved_datetime.date().isoformat(),
             "time": resolved_datetime.strftime("%H:%M"),
             "datetime": resolved_datetime.strftime("%Y-%m-%dT%H:%M"),
+            "weekday": weekday_names_ja[resolved_datetime.weekday()],
             "source": "relative_time_delta",
         }
 
@@ -344,6 +347,7 @@ def _resolve_schedule_expression(
         "date": resolved_date.isoformat(),
         "time": resolved_time,
         "datetime": resolved_datetime.strftime("%Y-%m-%dT%H:%M"),
+        "weekday": weekday_names_ja[resolved_date.weekday()],
         "source": source,
     }
 

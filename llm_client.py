@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 from types import SimpleNamespace
 
@@ -489,6 +489,21 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     current_time_jp = now.strftime("%Y年%m月%d日 (%A) %H時%M分%S秒")
     current_time_iso = now.isoformat(timespec="seconds")
 
+    # Build weekday calendar for this week and next week
+    _weekday_names_ja = ["月", "火", "水", "木", "金", "土", "日"]
+    _today = now.date()
+    _current_weekday_ja = _weekday_names_ja[_today.weekday()]
+    _this_monday = _today - timedelta(days=_today.weekday())
+    _next_monday = _this_monday + timedelta(days=7)
+    _this_week_cal = " / ".join(
+        f"{_weekday_names_ja[i]}={(_this_monday + timedelta(days=i)).strftime('%m/%d')}"
+        for i in range(7)
+    )
+    _next_week_cal = " / ".join(
+        f"{_weekday_names_ja[i]}={(_next_monday + timedelta(days=i)).strftime('%m/%d')}"
+        for i in range(7)
+    )
+
     # Sanitize inputs to prevent hallucination of tool formats
     context = _sanitize_text(context)
     sanitized_messages = []
@@ -500,6 +515,10 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
 
     base_system_prompt = (
         f"現在日時: {current_time_jp} / {current_time_iso}\n"
+        f"今日: {_today.isoformat()} ({_current_weekday_ja}曜日)\n"
+        f"今週: {_this_week_cal}\n"
+        f"来週: {_next_week_cal}\n"
+        "\n"
         "あなたはユーザーの生活リズムを整え、日々のタスク管理をサポートする、親しみやすく頼れるパートナーAIです。\n"
         "ユーザーの自然言語による指示を解釈し、適切なツールを選択して、ルーチンの管理、カスタムタスク（予定）の操作、日報（Daily Log）の記録を行います。\n"
         "\n"
@@ -513,7 +532,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "    - **新規作成時**: アイテムを新規作成した場合、そのIDは「実行結果」として会話履歴に残ります。直後の操作ではそのIDを参照してください。\n"
         "\n"
         "## ツールの選択基準\n"
-        "- **日時計算（最優先）**: 今日以外の日付を扱う場合は、相対表現だけでなく「2026-03-01」「3/1」「金曜日」などでも `resolve_schedule_expression` を先に実行し、その計算結果を次のツール引数へ使用します。\n"
+        "- **日時計算の2ステップ原則（最重要）**: 今日以外の日付を扱う場合は、**最初のラウンドで `resolve_schedule_expression` のみを呼んでください**。他の日付依存ツール（`create_custom_task`, `toggle_step`, `update_log`, `append_day_log`, `get_day_log`, `list_tasks_in_period`, `get_daily_summary`）と同時に呼ばないでください。計算結果（`resolved_datetime_memory`）を受け取ってから、次のラウンドでその date を使って操作ツールを呼んでください。\n"
         "    - コンテキストやフィードバックに `resolved_datetime_memory` がある場合は、その値を再利用し、同じ expression で `resolve_schedule_expression` を繰り返さないでください。\n"
         "    - 記念日やイベント名（例: ホワイトデー）を含む場合は、モデルの一般知識で具体的な月日へ展開し、`expression` には「3月14日」「2026-03-14」のような解釈可能な形を渡してください。\n"
         "    - 「その3日後」「その翌日」など参照語を含む表現は、`resolved_datetime_memory` の直近の date を `base_date` に指定して計算してください。\n"
@@ -526,7 +545,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "    - 「日記をつけて」「メモして」など、その日全体の記録は `append_day_log` (追記) を優先的に使用してください。上書きしたい場合のみ `update_log` を使います。\n"
         "    - 特定のタスクに対するメモは `update_custom_task_memo` や `update_step_memo` を使用します。\n"
         "- **完了チェック**: タスクの完了は `toggle_custom_task`、ルーチンのステップは `toggle_step` です。\n"
-        "- **複数ステップ要求**: 1回の返答で実行可能なステップはまとめてツールコールしてください。ID依存で分割が必要な時だけ次ラウンドへ進めます。\n"
+        "- **複数ステップ要求**: 日付依存しないツール（`add_routine`, `delete_routine` 等）はまとめて呼んで構いません。日付依存ツールは `resolve_schedule_expression` の結果を受け取ってから呼んでください。\n"
         "- **重複防止**: 直前ラウンドと同じ参照/計算ツールを繰り返さず、`inferred_request_progress` の `next_expected_step` を優先してください。\n"
         "- **条件付き実行**: 「空いていれば追加」の場合、確認結果が空（タスクなし）なら追加アクションへ進みます。空でない場合のみ追加を見送ります。\n"
         "\n"

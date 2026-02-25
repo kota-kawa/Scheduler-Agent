@@ -322,6 +322,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     "計算結果: "
                     f"expression={expression_text} "
                     f"date={calc.get('date')} "
+                    f"weekday={calc.get('weekday', '')} "
                     f"time={calc.get('time')} "
                     f"datetime={calc.get('datetime')} "
                     f"source={calc.get('source')}"

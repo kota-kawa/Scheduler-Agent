@@ -29,6 +29,20 @@ from scheduler_agent.services.schedule_parser_service import (
 from scheduler_agent.services.timeline_service import _build_scheduler_context
 
 
+# Actions that accept date parameters and depend on correct date resolution.
+# When these are mixed with resolve_schedule_expression in a single batch,
+# the resolve must execute first so the LLM can use the calculated result.
+_DATE_DEPENDENT_ACTION_TYPES = {
+    "create_custom_task",
+    "toggle_step",
+    "update_log",
+    "append_day_log",
+    "get_day_log",
+    "list_tasks_in_period",
+    "get_daily_summary",
+}
+
+
 _REFERENCE_DATE_TOKENS = (
     "その",
     "それ",
@@ -350,6 +364,7 @@ def _extract_resolved_memory_from_actions(
             {
                 "expression": expression.strip(),
                 "date": str(calc.get("date", "")),
+                "weekday": str(calc.get("weekday", "")),
                 "time": str(calc.get("time", "")),
                 "datetime": str(calc.get("datetime", "")),
                 "period_start": str(calc.get("period_start", "")),
@@ -368,6 +383,7 @@ def _build_round_feedback(
     completed_steps: int = 0,
     resolved_memory: List[Dict[str, str]] | None = None,
     duplicate_warning: str = "",
+    deferred_actions: List[Dict[str, Any]] | None = None,
 ) -> str:
     action_lines = "\n".join(
         f"- {json.dumps(action, ensure_ascii=False, sort_keys=True)}" for action in actions
@@ -378,11 +394,26 @@ def _build_round_feedback(
     resolved_lines = "\n".join(
         "- expression="
         f"{item.get('expression')} => date={item.get('date')} "
+        f"weekday={item.get('weekday', '')} "
         f"time={item.get('time')} datetime={item.get('datetime')} "
         f"period_start={item.get('period_start', '')} period_end={item.get('period_end', '')}"
         for item in (resolved_memory or [])[-3:]
     ) or "- (none)"
     duplicate_lines = f"duplicate_warning:\n- {duplicate_warning}\n" if duplicate_warning else ""
+
+    deferred_lines = ""
+    if deferred_actions:
+        deferred_summaries = []
+        for da in deferred_actions:
+            da_type = da.get("type", "unknown")
+            da_params = {k: v for k, v in da.items() if k != "type"}
+            deferred_summaries.append(f"- {da_type}: {json.dumps(da_params, ensure_ascii=False)}")
+        deferred_lines = (
+            "deferred_actions (日時計算の結果を受けてから実行してください):\n"
+            + "\n".join(deferred_summaries)
+            + "\n⚠️ 上記アクションは resolve_schedule_expression の計算結果を待つため未実行です。"
+            " resolved_datetime_memory の date / weekday を確認し、正しい YYYY-MM-DD を指定して再度ツールを呼んでください。\n"
+        )
 
     return (
         f"Execution round {round_index} completed.\n"
@@ -391,6 +422,7 @@ def _build_round_feedback(
         "resolved_datetime_memory:\n"
         f"{resolved_lines}\n"
         f"{duplicate_lines}"
+        f"{deferred_lines}"
         "executed_actions:\n"
         f"{action_lines}\n"
         "execution_results:\n"
@@ -399,7 +431,7 @@ def _build_round_feedback(
         f"{error_lines}\n"
         "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
         "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
-        "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は resolve_schedule_expression を先に実行してから参照/更新ツールを呼んでください。\n"
+        "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は resolve_schedule_expression のみを先に実行し、計算結果を受け取ってから参照/更新ツールを呼んでください。同じラウンドで混ぜないでください。\n"
         "resolve_schedule_expression が「日付表現を解釈できませんでした」を返した場合は、同じ expression を繰り返さず、記念日名や曖昧語を具体的な月日/ISO日付へ言い換えて再計算してください。\n"
         "「その3日後」「その翌日」など参照語つき日時は、resolved_datetime_memory の直近 date を base_date に設定して計算してください。\n"
         "直前と同じ参照/計算アクションを繰り返さず、next_expected_step を優先してください。\n"
@@ -459,6 +491,25 @@ def _run_scheduler_multi_step(
         current_actions = _inject_base_date_for_reference_resolves(current_actions, resolved_memory)
         if not current_actions:
             break
+
+        # Split batch: if resolve_schedule_expression is mixed with date-dependent
+        # actions, execute only resolve (+ non-date-dependent) first so the LLM
+        # receives the calculated result before specifying dates for other tools.
+        deferred_actions: List[Dict[str, Any]] = []
+        has_resolve = any(
+            str(a.get("type", "")) == "resolve_schedule_expression" for a in current_actions
+        )
+        has_date_dependent = any(
+            str(a.get("type", "")) in _DATE_DEPENDENT_ACTION_TYPES for a in current_actions
+        )
+        if has_resolve and has_date_dependent:
+            kept: List[Dict[str, Any]] = []
+            for a in current_actions:
+                if str(a.get("type", "")) in _DATE_DEPENDENT_ACTION_TYPES:
+                    deferred_actions.append(a)
+                else:
+                    kept.append(a)
+            current_actions = kept
 
         current_action_types = [
             str(action.get("type", "")) for action in current_actions if isinstance(action, dict)
@@ -534,6 +585,7 @@ def _run_scheduler_multi_step(
                 completed_steps=completed_steps,
                 resolved_memory=resolved_memory,
                 duplicate_warning=duplicate_warning,
+                deferred_actions=deferred_actions,
             )
             assistant_feedback = reply_text.strip() or "了解しました。"
             working_messages = [
@@ -613,6 +665,7 @@ def _run_scheduler_multi_step(
             completed_steps=completed_steps,
             resolved_memory=resolved_memory,
             duplicate_warning=duplicate_warning,
+            deferred_actions=deferred_actions,
         )
         assistant_feedback = reply_text.strip() or "了解しました。"
         working_messages = [
