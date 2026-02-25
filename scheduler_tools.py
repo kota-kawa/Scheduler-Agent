@@ -125,9 +125,18 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = _DATE_CALC_TOOLS + [
     ),
     _build_tool(
         "delete_custom_task",
-        "指定したIDのカスタムタスクを削除します。",
+        "指定したIDのカスタムタスクを1件削除します。",
         {"task_id": {"type": "integer", "description": "カスタムタスクID"}},
         required=["task_id"],
+    ),
+    _build_tool(
+        "delete_tasks_in_range",
+        "開始日から終了日まで（両端含む）の期間に存在するカスタムタスクをすべて削除します。「来週の予定を全部消して」「〇〇から〇〇までの予定を削除」など期間指定の一括削除に使います。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
+        {
+            "start_date": {"type": "string", "description": "開始日 YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "終了日 YYYY-MM-DD（含む）"},
+        },
+        required=["start_date", "end_date"],
     ),
     _build_tool(
         "toggle_step",
