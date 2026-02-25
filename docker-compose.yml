@@ -36,7 +36,6 @@ services:
 
 networks:
   multi_agent_network:
-    external: true
     name: ${MULTI_AGENT_NETWORK:-multi_agent_platform_net}
 
 volumes:
