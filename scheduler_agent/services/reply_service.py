@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from llm_client import UnifiedClient, _content_to_text
 
@@ -177,13 +177,16 @@ def _build_final_reply(
     reply_text: str,
     results: List[str],
     errors: List[str],
+    *,
+    summary_client_factory: Callable[[], Any] = UnifiedClient,
+    content_to_text_fn: Callable[[Any], str] = _content_to_text,
 ) -> str:
     if not results and not errors:
         final_reply = reply_text if reply_text else "了解しました。"
         return _remove_no_schedule_lines(final_reply)
 
     visible_errors = [err for err in errors if not _is_internal_system_error(err)]
-    summary_client = UnifiedClient()
+    summary_client = summary_client_factory()
 
     result_text = ""
     if results:
@@ -219,7 +222,7 @@ def _build_final_reply(
             temperature=0.7,
             max_tokens=1000,
         )
-        final_reply = _content_to_text(resp.choices[0].message.content)
+        final_reply = content_to_text_fn(resp.choices[0].message.content)
         if _looks_mechanical_reply(final_reply):
             final_reply = _build_pop_friendly_reply(user_message, results, errors)
     except Exception as exc:

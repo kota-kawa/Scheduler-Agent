@@ -15,7 +15,7 @@ from sqlmodel import Session
 
 from llm_client import UnifiedClient, _content_to_text, call_scheduler_llm
 from model_selection import apply_model_selection, current_available_models, update_override
-from scheduler_agent.application import app
+from scheduler_agent.asgi import app
 from scheduler_agent.core.db import (
     _ensure_db_initialized,
     _init_db,
@@ -33,12 +33,12 @@ from scheduler_agent.models import (
     Routine,
     Step,
 )
-from scheduler_agent.services import action_service as action_service_module
-from scheduler_agent.services import chat_orchestration_service as chat_service_module
-from scheduler_agent.services import evaluation_seed_service as eval_seed_service
-from scheduler_agent.services import reply_service as reply_service_module
-from scheduler_agent.services import schedule_parser_service as parser_service
-from scheduler_agent.services import timeline_service as timeline_service_module
+import scheduler_agent.services.action_service as action_service_module
+import scheduler_agent.services.chat_orchestration_service as chat_service_module
+import scheduler_agent.services.evaluation_seed_service as eval_seed_service
+import scheduler_agent.services.reply_service as reply_service_module
+import scheduler_agent.services.schedule_parser_service as parser_service
+import scheduler_agent.services.timeline_service as timeline_service_module
 from scheduler_agent.web import handlers as web_handlers
 from scheduler_agent.web.templates import flash, pop_flashed_messages, template_response
 
@@ -93,10 +93,14 @@ def _build_final_reply(
     results: List[str],
     errors: List[str],
 ) -> str:
-    # Keep monkeypatch compatibility in tests (`app.UnifiedClient`).
-    reply_service_module.UnifiedClient = UnifiedClient
-    reply_service_module._content_to_text = _content_to_text
-    return reply_service_module._build_final_reply(user_message, reply_text, results, errors)
+    return reply_service_module._build_final_reply(
+        user_message,
+        reply_text,
+        results,
+        errors,
+        summary_client_factory=UnifiedClient,
+        content_to_text_fn=_content_to_text,
+    )
 
 
 def _run_scheduler_multi_step(
@@ -105,65 +109,28 @@ def _run_scheduler_multi_step(
     today: datetime.date,
     max_rounds: int | None = None,
 ) -> Dict[str, Any]:
-    # Keep monkeypatch compatibility in tests (`app.call_scheduler_llm`, etc).
-    chat_service_module.call_scheduler_llm = call_scheduler_llm
-    chat_service_module._build_scheduler_context = _build_scheduler_context
-    chat_service_module._apply_actions = _apply_actions
-    return chat_service_module._run_scheduler_multi_step(db, formatted_messages, today, max_rounds)
+    return chat_service_module._run_scheduler_multi_step(
+        db,
+        formatted_messages,
+        today,
+        max_rounds,
+        call_scheduler_llm_fn=call_scheduler_llm,
+        build_scheduler_context_fn=_build_scheduler_context,
+        apply_actions_fn=_apply_actions,
+    )
 
 
 def process_chat_request(
     db: Session, message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True
 ) -> Dict[str, Any]:
-    formatted_messages = []
-    user_message = ""
-
-    if isinstance(message_or_history, str):
-        user_message = message_or_history
-        formatted_messages = [{"role": "user", "content": user_message}]
-    else:
-        formatted_messages = message_or_history
-        if formatted_messages and formatted_messages[-1].get("role") == "user":
-            user_message = formatted_messages[-1].get("content", "")
-        else:
-            user_message = "(Context only)"
-
-    if save_history:
-        try:
-            db.add(ChatHistory(role="user", content=user_message))
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            print(f"Failed to save user message: {exc}")
-
-    today = datetime.date.today()
-    execution = _run_scheduler_multi_step(db, formatted_messages, today)
-    final_reply = _build_final_reply(
-        user_message=user_message,
-        reply_text=execution.get("reply_text", ""),
-        results=execution.get("results", []),
-        errors=execution.get("errors", []),
+    return chat_service_module.process_chat_request(
+        db,
+        message_or_history,
+        save_history=save_history,
+        run_scheduler_multi_step_fn=_run_scheduler_multi_step,
+        build_final_reply_fn=_build_final_reply,
+        attach_execution_trace_fn=_attach_execution_trace_to_stored_content,
     )
-
-    if save_history:
-        try:
-            stored_assistant_content = _attach_execution_trace_to_stored_content(
-                final_reply,
-                execution.get("execution_trace", []),
-            )
-            db.add(ChatHistory(role="assistant", content=stored_assistant_content))
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            print(f"Failed to save assistant message: {exc}")
-
-    results = execution.get("results", [])
-    return {
-        "reply": final_reply,
-        "should_refresh": (len(results) > 0),
-        "modified_ids": execution.get("modified_ids", []),
-        "execution_trace": execution.get("execution_trace", []),
-    }
 
 
 # --- Route logic wrappers (used by routers and direct tests) ---
