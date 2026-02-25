@@ -6,9 +6,10 @@ import os
 import threading
 from typing import Iterator
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, create_engine
 
 from scheduler_agent.core.config import DATABASE_URL
+from scheduler_agent.core.migrations import upgrade_to_head
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler"
 
@@ -57,10 +58,7 @@ def _ensure_db_initialized() -> None:
     with _db_init_lock:
         if _db_initialized:
             return
-        # Ensure model modules are imported before metadata creation.
-        from scheduler_agent import models as _models  # noqa: F401
-
-        SQLModel.metadata.create_all(bind=engine)
+        upgrade_to_head(_current_database_url)
         _db_initialized = True
 
 
