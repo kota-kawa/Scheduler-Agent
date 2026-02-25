@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
-from typing import Any, Dict, List, Union
+from typing import Any, Callable, Dict, List, Union
 
 from sqlmodel import Session
 
@@ -436,6 +436,13 @@ def _run_scheduler_multi_step(
     formatted_messages: List[Dict[str, str]],
     today: datetime.date,
     max_rounds: int | None = None,
+    *,
+    call_scheduler_llm_fn: Callable[[List[Dict[str, str]], str], tuple[str, List[Dict[str, Any]]]] = call_scheduler_llm,
+    build_scheduler_context_fn: Callable[[Session, datetime.date | None], str] = _build_scheduler_context,
+    apply_actions_fn: Callable[
+        [Session, List[Dict[str, Any]], datetime.date],
+        tuple[List[str], List[str], List[str]],
+    ] = _apply_actions,
 ) -> Dict[str, Any]:
     rounds_limit = max_rounds if isinstance(max_rounds, int) and max_rounds > 0 else get_max_action_rounds()
     working_messages = list(formatted_messages)
@@ -467,10 +474,10 @@ def _run_scheduler_multi_step(
         working_messages = [*working_messages, {"role": "system", "content": planning_message}]
 
     for round_index in range(1, rounds_limit + 1):
-        context = _build_scheduler_context(db, today)
+        context = build_scheduler_context_fn(db, today)
 
         try:
-            reply_text, actions = call_scheduler_llm(working_messages, context)
+            reply_text, actions = call_scheduler_llm_fn(working_messages, context)
         except Exception as exc:
             all_errors.append(f"LLM 呼び出しに失敗しました: {exc}")
             break
@@ -589,7 +596,7 @@ def _run_scheduler_multi_step(
                 break
             continue
 
-        results, errors, modified_ids = _apply_actions(db, actions_to_execute, today)
+        results, errors, modified_ids = apply_actions_fn(db, actions_to_execute, today)
         all_actions.extend(actions_to_execute)
         all_results.extend(results)
         all_errors.extend(errors)
@@ -683,7 +690,19 @@ def _run_scheduler_multi_step(
 
 
 def process_chat_request(
-    db: Session, message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True
+    db: Session,
+    message_or_history: Union[str, List[Dict[str, str]]],
+    save_history: bool = True,
+    *,
+    run_scheduler_multi_step_fn: Callable[
+        [Session, List[Dict[str, str]], datetime.date],
+        Dict[str, Any],
+    ] = _run_scheduler_multi_step,
+    build_final_reply_fn: Callable[[str, str, List[str], List[str]], str] = _build_final_reply,
+    attach_execution_trace_fn: Callable[
+        [str, List[Dict[str, Any]] | None],
+        str,
+    ] = _attach_execution_trace_to_stored_content,
 ) -> Dict[str, Any]:
     formatted_messages = []
     user_message = ""
@@ -707,8 +726,8 @@ def process_chat_request(
             print(f"Failed to save user message: {exc}")
 
     today = datetime.date.today()
-    execution = _run_scheduler_multi_step(db, formatted_messages, today)
-    final_reply = _build_final_reply(
+    execution = run_scheduler_multi_step_fn(db, formatted_messages, today)
+    final_reply = build_final_reply_fn(
         user_message=user_message,
         reply_text=execution.get("reply_text", ""),
         results=execution.get("results", []),
@@ -717,7 +736,7 @@ def process_chat_request(
 
     if save_history:
         try:
-            stored_assistant_content = _attach_execution_trace_to_stored_content(
+            stored_assistant_content = attach_execution_trace_fn(
                 final_reply,
                 execution.get("execution_trace", []),
             )
