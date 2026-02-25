@@ -81,6 +81,24 @@ docker compose down
 
 ---
 
+## 🗂️ Schema migrations (Alembic)
+
+Schema changes are managed with Alembic.
+
+```bash
+export DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler
+alembic upgrade head
+```
+
+When you change SQLModel definitions, generate and apply a revision:
+
+```bash
+alembic revision --autogenerate -m "describe your schema change"
+alembic upgrade head
+```
+
+---
+
 ## ✅ Testing and CI
 
 ### Local test run
@@ -193,6 +211,24 @@ docker compose up --build
 
 ```bash
 docker compose down
+```
+
+---
+
+## 🗂️ スキーママイグレーション（Alembic）
+
+スキーマ変更は Alembic で管理します。
+
+```bash
+export DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler
+alembic upgrade head
+```
+
+SQLModel の定義を変更した場合は、リビジョンを作成して適用してください。
+
+```bash
+alembic revision --autogenerate -m "スキーマ変更の内容"
+alembic upgrade head
 ```
 
 ---
