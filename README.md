@@ -81,6 +81,48 @@ docker compose down
 
 ---
 
+## ✅ Testing and CI
+
+### Local test run
+Use the same Python version as CI (3.12+) and install dependencies.
+
+```bash
+python -m pip install -e .
+python -m pip install pytest pytest-cov
+```
+
+Fast regression set:
+
+```bash
+pytest -q tests/test_architecture_imports.py tests/test_ci_smoke.py
+```
+
+PostgreSQL smoke + coverage:
+
+```bash
+export TEST_DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
+export DATABASE_URL=$TEST_DATABASE_URL
+export SESSION_SECRET=test-secret
+pytest -q \
+  --cov=scheduler_agent \
+  --cov=app \
+  --cov-report=term-missing \
+  --cov-report=xml \
+  tests/test_architecture_imports.py \
+  tests/test_ci_smoke.py \
+  tests/test_ci_postgres_smoke.py
+```
+
+### CI behavior
+- `.github/workflows/syntax-check.yml` runs Python and TypeScript syntax checks.
+- `.github/workflows/tests.yml` runs:
+  - fast tests (`test_architecture_imports`, `test_ci_smoke`)
+  - PostgreSQL-backed smoke tests (`test_ci_postgres_smoke`)
+  - coverage report generation (`reports/coverage.xml`)
+  - skipped-test detection (CI fails if any test is skipped in integration job)
+
+---
+
 ## 📜 License
 
 This project is released under the [MIT License](LICENSE.md).
@@ -152,6 +194,48 @@ docker compose up --build
 ```bash
 docker compose down
 ```
+
+---
+
+## ✅ テストとCI
+
+### ローカルでのテスト実行
+CI と同じ Python 3.12+ を使い、依存を入れてください。
+
+```bash
+python -m pip install -e .
+python -m pip install pytest pytest-cov
+```
+
+軽量な回帰テスト:
+
+```bash
+pytest -q tests/test_architecture_imports.py tests/test_ci_smoke.py
+```
+
+PostgreSQL スモークテストとカバレッジ:
+
+```bash
+export TEST_DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
+export DATABASE_URL=$TEST_DATABASE_URL
+export SESSION_SECRET=test-secret
+pytest -q \
+  --cov=scheduler_agent \
+  --cov=app \
+  --cov-report=term-missing \
+  --cov-report=xml \
+  tests/test_architecture_imports.py \
+  tests/test_ci_smoke.py \
+  tests/test_ci_postgres_smoke.py
+```
+
+### CI の動作
+- `.github/workflows/syntax-check.yml` で Python / TypeScript の構文チェックを実行します。
+- `.github/workflows/tests.yml` で以下を実行します。
+  - fast テスト（`test_architecture_imports`, `test_ci_smoke`）
+  - PostgreSQL 連携スモークテスト（`test_ci_postgres_smoke`）
+  - カバレッジレポート生成（`reports/coverage.xml`）
+  - skip 監視（integration ジョブで skip が1件でもあれば失敗）
 
 ---
 
