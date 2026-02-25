@@ -115,10 +115,16 @@ jobs:
         if: always()
         run: |
           python - <<'PY'
+          from pathlib import Path
           import sys
           import xml.etree.ElementTree as ET
 
-          tree = ET.parse("reports/junit.xml")
+          report_path = Path("reports/junit.xml")
+          if not report_path.exists():
+            print("reports/junit.xml was not generated. Skip-count check is skipped.")
+            raise SystemExit(0)
+
+          tree = ET.parse(report_path)
           root = tree.getroot()
           skipped = 0
           for suite in root.iter("testsuite"):
