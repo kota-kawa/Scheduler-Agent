@@ -12,7 +12,11 @@ from sqlmodel import Session
 from llm_client import call_scheduler_llm
 from scheduler_agent.core.config import get_max_action_rounds, get_max_same_read_action_streak
 from scheduler_agent.models import ChatHistory
-from scheduler_agent.services.action_service import READ_ONLY_ACTION_TYPES, _apply_actions
+from scheduler_agent.services.action_service import (
+    READ_ONLY_ACTION_TYPES,
+    _CALC_ACTION_TYPES,
+    _apply_actions,
+)
 from scheduler_agent.services.reply_service import (
     _attach_execution_trace_to_stored_content,
     _build_final_reply,
@@ -20,9 +24,7 @@ from scheduler_agent.services.reply_service import (
 from scheduler_agent.services.schedule_parser_service import (
     _extract_relative_week_shift,
     _extract_weekday,
-    _normalize_hhmm,
-    _parse_date,
-    _resolve_schedule_expression,
+    _requires_date_resolution,
     _try_parse_iso_date,
     _week_bounds,
 )
@@ -30,8 +32,8 @@ from scheduler_agent.services.timeline_service import _build_scheduler_context
 
 
 # Actions that accept date parameters and depend on correct date resolution.
-# When these are mixed with resolve_schedule_expression in a single batch,
-# the resolve must execute first so the LLM can use the calculated result.
+# When these are mixed with calc tools in a single batch,
+# the calc tools must execute first so the LLM can use the calculated result.
 _DATE_DEPENDENT_ACTION_TYPES = {
     "create_custom_task",
     "toggle_step",
@@ -43,27 +45,6 @@ _DATE_DEPENDENT_ACTION_TYPES = {
 }
 
 
-_REFERENCE_DATE_TOKENS = (
-    "その",
-    "それ",
-    "同日",
-    "当日",
-    "同じ日",
-    "その日",
-    "翌日",
-    "翌々日",
-    "前日",
-    "前々日",
-)
-
-
-def _has_reference_date_token(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    if not text:
-        return False
-    return any(token in text for token in _REFERENCE_DATE_TOKENS)
 
 
 def _action_signature(actions: List[Dict[str, Any]]) -> str:
@@ -187,60 +168,6 @@ def _normalize_actions_for_week_scope_confirmation(
     return normalized
 
 
-def _inject_base_date_for_reference_resolves(
-    actions: List[Dict[str, Any]],
-    resolved_memory: List[Dict[str, str]],
-) -> List[Dict[str, Any]]:
-    last_resolved_date: datetime.date | None = None
-    for item in reversed(resolved_memory or []):
-        if not isinstance(item, dict):
-            continue
-        parsed = _try_parse_iso_date(item.get("date"))
-        if parsed is not None:
-            last_resolved_date = parsed
-            break
-
-    if last_resolved_date is None:
-        return actions
-
-    normalized: List[Dict[str, Any]] = []
-    for action in actions:
-        if not isinstance(action, dict):
-            normalized.append(action)
-            continue
-        if str(action.get("type", "")) != "resolve_schedule_expression":
-            normalized.append(action)
-            continue
-        expression = action.get("expression")
-        if not _has_reference_date_token(expression):
-            normalized.append(action)
-            continue
-        base_date_value = action.get("base_date")
-        if _try_parse_iso_date(base_date_value) is not None:
-            normalized.append(action)
-            continue
-
-        updated = dict(action)
-        updated["base_date"] = last_resolved_date.isoformat()
-        normalized.append(updated)
-
-        fallback_base_time = datetime.datetime.now().strftime("%H:%M")
-        base_time_value = _normalize_hhmm(updated.get("base_time"), fallback_base_time)
-        default_time_value = _normalize_hhmm(updated.get("default_time"), base_time_value)
-        calc = _resolve_schedule_expression(
-            expression=str(expression or ""),
-            base_date=last_resolved_date,
-            base_time=base_time_value,
-            default_time=default_time_value,
-        )
-        if not calc.get("ok"):
-            continue
-        resolved_date = _try_parse_iso_date(calc.get("date"))
-        if resolved_date is not None:
-            last_resolved_date = resolved_date
-
-    return normalized
-
 
 def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
     if not isinstance(user_message, str) or not user_message.strip():
@@ -261,7 +188,7 @@ def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
 
     from scheduler_agent.services.schedule_parser_service import _is_relative_datetime_text
 
-    if _is_relative_datetime_text(user_message):
+    if _is_relative_datetime_text(user_message) or _requires_date_resolution(user_message):
         events.append((0, "calculate"))
 
     if not events:
@@ -272,7 +199,7 @@ def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
     step_definitions: Dict[str, Dict[str, Any]] = {
         "calculate": {
             "label": "日時計算",
-            "action_types": {"resolve_schedule_expression"},
+            "action_types": _CALC_ACTION_TYPES,
         },
         "confirm": {
             "label": "予定確認",
@@ -339,34 +266,97 @@ def _extract_resolved_memory_from_actions(
     actions: List[Dict[str, Any]],
     default_date: datetime.date,
 ) -> List[Dict[str, str]]:
+    """Extract calculation results from atomic calc tool actions for memory."""
+    from scheduler_agent.services.schedule_parser_service import (
+        _calc_date_offset,
+        _calc_month_boundary,
+        _calc_nearest_weekday,
+        _calc_time_offset,
+        _calc_week_range,
+        _calc_week_weekday,
+        _get_date_info,
+    )
+
     memories: List[Dict[str, str]] = []
-    fallback_base_time = datetime.datetime.now().strftime("%H:%M")
     for action in actions:
         if not isinstance(action, dict):
             continue
-        if action.get("type") != "resolve_schedule_expression":
+        action_type = action.get("type")
+        if action_type not in _CALC_ACTION_TYPES:
             continue
-        expression = action.get("expression")
-        if not isinstance(expression, str) or not expression.strip():
+
+        calc: Dict[str, Any] = {}
+        description = action_type
+
+        try:
+            if action_type == "calc_date_offset":
+                bd = _try_parse_iso_date(action.get("base_date"))
+                if bd is None:
+                    continue
+                offset = int(action.get("offset_days", 0))
+                calc = _calc_date_offset(bd, offset)
+                description = f"calc_date_offset({bd.isoformat()}, {offset})"
+
+            elif action_type == "calc_month_boundary":
+                year = int(action.get("year", 0))
+                month = int(action.get("month", 0))
+                boundary = str(action.get("boundary", ""))
+                calc = _calc_month_boundary(year, month, boundary)
+                description = f"calc_month_boundary({year}, {month}, {boundary})"
+
+            elif action_type == "calc_nearest_weekday":
+                bd = _try_parse_iso_date(action.get("base_date"))
+                if bd is None:
+                    continue
+                wd = int(action.get("weekday", -1))
+                direction = str(action.get("direction", ""))
+                calc = _calc_nearest_weekday(bd, wd, direction)
+                description = f"calc_nearest_weekday({bd.isoformat()}, {wd}, {direction})"
+
+            elif action_type == "calc_week_weekday":
+                bd = _try_parse_iso_date(action.get("base_date"))
+                if bd is None:
+                    continue
+                wo = int(action.get("week_offset", 0))
+                wd = int(action.get("weekday", -1))
+                calc = _calc_week_weekday(bd, wo, wd)
+                description = f"calc_week_weekday({bd.isoformat()}, {wo}, {wd})"
+
+            elif action_type == "calc_week_range":
+                bd = _try_parse_iso_date(action.get("base_date"))
+                if bd is None:
+                    continue
+                calc = _calc_week_range(bd)
+                description = f"calc_week_range({bd.isoformat()})"
+
+            elif action_type == "calc_time_offset":
+                bd = _try_parse_iso_date(action.get("base_date"))
+                if bd is None:
+                    continue
+                bt = str(action.get("base_time", ""))
+                om = int(action.get("offset_minutes", 0))
+                calc = _calc_time_offset(bd, bt, om)
+                description = f"calc_time_offset({bd.isoformat()}, {bt}, {om})"
+
+            elif action_type == "get_date_info":
+                d = _try_parse_iso_date(action.get("date"))
+                if d is None:
+                    continue
+                calc = _get_date_info(d)
+                description = f"get_date_info({d.isoformat()})"
+
+        except (TypeError, ValueError):
             continue
-        base_date_value = _parse_date(action.get("base_date"), default_date)
-        base_time_value = _normalize_hhmm(action.get("base_time"), fallback_base_time)
-        default_time_value = _normalize_hhmm(action.get("default_time"), base_time_value)
-        calc = _resolve_schedule_expression(
-            expression=expression,
-            base_date=base_date_value,
-            base_time=base_time_value,
-            default_time=default_time_value,
-        )
+
         if not calc.get("ok"):
             continue
+
         memories.append(
             {
-                "expression": expression.strip(),
+                "expression": description,
                 "date": str(calc.get("date", "")),
                 "weekday": str(calc.get("weekday", "")),
                 "time": str(calc.get("time", "")),
-                "datetime": str(calc.get("datetime", "")),
                 "period_start": str(calc.get("period_start", "")),
                 "period_end": str(calc.get("period_end", "")),
             }
@@ -411,7 +401,7 @@ def _build_round_feedback(
         deferred_lines = (
             "deferred_actions (日時計算の結果を受けてから実行してください):\n"
             + "\n".join(deferred_summaries)
-            + "\n⚠️ 上記アクションは resolve_schedule_expression の計算結果を待つため未実行です。"
+            + "\n⚠️ 上記アクションは計算ツール(calc_*)の計算結果を待つため未実行です。"
             " resolved_datetime_memory の date / weekday を確認し、正しい YYYY-MM-DD を指定して再度ツールを呼んでください。\n"
         )
 
@@ -431,9 +421,9 @@ def _build_round_feedback(
         f"{error_lines}\n"
         "元のユーザー要望を満たすために追加操作が必要ならツールを続けて呼んでください。\n"
         "要望が満たされた場合はツールを呼ばず、自然な日本語の最終回答のみを返してください。\n"
-        "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は resolve_schedule_expression のみを先に実行し、計算結果を受け取ってから参照/更新ツールを呼んでください。同じラウンドで混ぜないでください。\n"
-        "resolve_schedule_expression が「日付表現を解釈できませんでした」を返した場合は、同じ expression を繰り返さず、記念日名や曖昧語を具体的な月日/ISO日付へ言い換えて再計算してください。\n"
-        "「その3日後」「その翌日」など参照語つき日時は、resolved_datetime_memory の直近 date を base_date に設定して計算してください。\n"
+        "今日以外の日付を扱う場合（相対表現・曜日指定・明示日付を含む）は計算ツール(calc_*)のみを先に実行し、計算結果を受け取ってから参照/更新ツールを呼んでください。同じラウンドで混ぜないでください。\n"
+        "計算ツールがエラーを返した場合は、引数を修正して再計算してください。\n"
+        "計算結果を組み合わせる場合（例: 来月末の金曜）、前の計算結果の date を次の計算の base_date に使ってください。\n"
         "直前と同じ参照/計算アクションを繰り返さず、next_expected_step を優先してください。\n"
         "同じ作成・更新系のアクションを重複して実行しないでください。"
     )
@@ -488,21 +478,20 @@ def _run_scheduler_multi_step(
 
         current_actions = [a for a in actions if isinstance(a, dict)] if isinstance(actions, list) else []
         current_actions = _normalize_actions_for_week_scope_confirmation(current_actions, user_message)
-        current_actions = _inject_base_date_for_reference_resolves(current_actions, resolved_memory)
         if not current_actions:
             break
 
-        # Split batch: if resolve_schedule_expression is mixed with date-dependent
-        # actions, execute only resolve (+ non-date-dependent) first so the LLM
+        # Split batch: if calc tools are mixed with date-dependent
+        # actions, execute only calc (+ non-date-dependent) first so the LLM
         # receives the calculated result before specifying dates for other tools.
         deferred_actions: List[Dict[str, Any]] = []
-        has_resolve = any(
-            str(a.get("type", "")) == "resolve_schedule_expression" for a in current_actions
+        has_calc = any(
+            str(a.get("type", "")) in _CALC_ACTION_TYPES for a in current_actions
         )
         has_date_dependent = any(
             str(a.get("type", "")) in _DATE_DEPENDENT_ACTION_TYPES for a in current_actions
         )
-        if has_resolve and has_date_dependent:
+        if has_calc and has_date_dependent:
             kept: List[Dict[str, Any]] = []
             for a in current_actions:
                 if str(a.get("type", "")) in _DATE_DEPENDENT_ACTION_TYPES:

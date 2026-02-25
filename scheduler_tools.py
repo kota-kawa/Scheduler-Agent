@@ -28,31 +28,81 @@ def _build_tool(
 # 日本語: レビュー結果ツール名 / English: Tool name for review decision
 REVIEW_DECISION_TOOL_NAME = "set_review_outcome"
 
-# 日本語: スケジューラ向けツール一覧 / English: Tool list for scheduler actions
-SCHEDULER_TOOLS: List[Dict[str, Any]] = [
+# ---------- 原子的日付計算ツール ----------
+# LLM が日本語を解釈 → 適切な計算ツールを呼び出し → 結果を受け取る → 操作ツールに渡す
+_DATE_CALC_TOOLS: List[Dict[str, Any]] = [
     _build_tool(
-        "resolve_schedule_expression",
-        "日時表現（例: 3日後、来週火曜、2時間後、明日の9時、2026-03-01、3/1、金曜日）を絶対日時へ変換します。【2ステップ原則】このツールは他の日付依存ツールと同じラウンドで呼ばず、必ず単独で先に呼んでください。計算結果（date, weekday）を受け取ってから、次のラウンドで操作ツールを呼んでください。today_date 以外の日付を扱う参照/更新の前に必ず使ってください。曜日や時刻を含む日時句は省略せずそのまま expression に入れてください。記念日名を含む場合（例: 来月のホワイトデー）は、モデル側で「3月14日」などの具体日付に解釈して expression に渡してください。「その3日後」のような参照は、直前に解決した日付を base_date に指定してください。週のみ指定（例: 来週）では date はその週の月曜日になり、週範囲（period_start/period_end）も返ります。",
+        "calc_date_offset",
+        "基準日からN日後/前の日付を計算します。例: 明日(+1), 明後日(+2), 3日後(+3), 昨日(-1)",
         {
-            "expression": {"type": "string", "description": "変換したい日時表現"},
-            "base_date": {
-                "type": "string",
-                "description": "計算基準日 (YYYY-MM-DD)。省略時は today_date",
-            },
-            "base_time": {
-                "type": "string",
-                "description": "計算基準時刻 (HH:MM)。相対時刻計算で使用",
-            },
-            "default_time": {
-                "type": "string",
-                "description": "表現に時刻が無い場合の既定値 (HH:MM)",
-            },
+            "base_date": {"type": "string", "description": "基準日 (YYYY-MM-DD)。通常はシステムプロンプトの today_date を指定"},
+            "offset_days": {"type": "integer", "description": "日数オフセット（正=後、負=前）"},
         },
-        required=["expression"],
+        required=["base_date", "offset_days"],
     ),
     _build_tool(
+        "calc_month_boundary",
+        "指定年月の月初日(start)または月末日(end)を取得します。例: 来月末→(year=来月の年, month=来月, boundary=end)",
+        {
+            "year": {"type": "integer", "description": "年 (例: 2026)"},
+            "month": {"type": "integer", "description": "月 (1-12)"},
+            "boundary": {"type": "string", "description": "'start' (月初) または 'end' (月末)"},
+        },
+        required=["year", "month", "boundary"],
+    ),
+    _build_tool(
+        "calc_nearest_weekday",
+        "基準日から最も近い指定曜日を前方/後方に探します。基準日が該当曜日ならその日を返します。例: 来月末の金曜→月末を取得後、backward で金曜を探す",
+        {
+            "base_date": {"type": "string", "description": "基準日 (YYYY-MM-DD)"},
+            "weekday": {"type": "integer", "description": "曜日番号 (0=月, 1=火, 2=水, 3=木, 4=金, 5=土, 6=日)"},
+            "direction": {"type": "string", "description": "'forward' (次の該当曜日) または 'backward' (前の該当曜日)"},
+        },
+        required=["base_date", "weekday", "direction"],
+    ),
+    _build_tool(
+        "calc_week_weekday",
+        "N週後/前の指定曜日の日付を計算します。例: 来週火曜(week_offset=1, weekday=1), 再来週金曜(week_offset=2, weekday=4)",
+        {
+            "base_date": {"type": "string", "description": "基準日 (YYYY-MM-DD)"},
+            "week_offset": {"type": "integer", "description": "週オフセット (0=今週, 1=来週, -1=先週, 2=再来週)"},
+            "weekday": {"type": "integer", "description": "曜日番号 (0=月, 1=火, 2=水, 3=木, 4=金, 5=土, 6=日)"},
+        },
+        required=["base_date", "week_offset", "weekday"],
+    ),
+    _build_tool(
+        "calc_week_range",
+        "指定日が含まれる週の月曜〜日曜の範囲を返します。「来週の予定」確認時に使用。来週なら base_date に来週の任意の日を指定。",
+        {
+            "base_date": {"type": "string", "description": "対象週に含まれる任意の日付 (YYYY-MM-DD)"},
+        },
+        required=["base_date"],
+    ),
+    _build_tool(
+        "calc_time_offset",
+        "基準日時から分単位で加減算します。日跨ぎも自動処理。例: 2時間後(+120), 30分前(-30)",
+        {
+            "base_date": {"type": "string", "description": "基準日 (YYYY-MM-DD)"},
+            "base_time": {"type": "string", "description": "基準時刻 (HH:MM)"},
+            "offset_minutes": {"type": "integer", "description": "分数オフセット（正=後、負=前）"},
+        },
+        required=["base_date", "base_time", "offset_minutes"],
+    ),
+    _build_tool(
+        "get_date_info",
+        "指定日の曜日等の情報を取得します。曜日の確認や検算に使用。",
+        {
+            "date": {"type": "string", "description": "対象日 (YYYY-MM-DD)"},
+        },
+        required=["date"],
+    ),
+]
+
+# 日本語: スケジューラ向けツール一覧 / English: Tool list for scheduler actions
+SCHEDULER_TOOLS: List[Dict[str, Any]] = _DATE_CALC_TOOLS + [
+    _build_tool(
         "create_custom_task",
-        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付を省略した場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の計算結果を使って指定してください。",
+        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "name": {"type": "string", "description": "タスク名"},
@@ -69,7 +119,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "toggle_step",
-        "ステップの完了状態を更新します。日付が無い場合は today_date を利用してください。today_date 以外の日付を指定する場合は resolve_schedule_expression で先に計算した日付を使ってください。",
+        "ステップの完了状態を更新します。日付が無い場合は today_date を利用してください。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから YYYY-MM-DD 形式で指定してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "step_id": {"type": "integer", "description": "ステップID"},
@@ -117,7 +167,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "update_log",
-        "指定日付の日報（記録・メモ）を上書き保存します。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
+        "指定日付の日報（記録・メモ）を上書き保存します。日付が無い場合は today_date を使ってください。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "日報本文"},
@@ -126,7 +176,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "append_day_log",
-        "指定日付の日報（記録・メモ）に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
+        "指定日付の日報（記録・メモ）に追記します。既存の内容は保持され、新しい内容が改行区切りで追加されます。日付が無い場合は today_date を使ってください。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "content": {"type": "string", "description": "追記する内容"},
@@ -135,7 +185,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "get_day_log",
-        "指定日付の日報（記録・メモ）を取得します。日付が無い場合は today_date を使ってください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
+        "指定日付の日報（記録・メモ）を取得します。日付が無い場合は today_date を使ってください。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してください。",
         {"date": {"type": "string", "description": "YYYY-MM-DD"}},
     ),
     _build_tool(
@@ -216,7 +266,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "list_tasks_in_period",
-        "指定期間のタスク・ルーチンステップ一覧を取得します。today_date を含まない期間、または today_date 以外の日付を含む期間を扱う場合は、開始日・終了日を resolve_schedule_expression で計算してから指定してください。『来週の予定確認』のような週単位確認は start_date=来週の月曜, end_date=来週の日曜 として指定してください。",
+        "指定期間のタスク・ルーチンステップ一覧を取得します。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してください。『来週の予定確認』は calc_week_range で週範囲を取得してから使ってください。",
         {
             "start_date": {"type": "string", "description": "YYYY-MM-DD"},
             "end_date": {"type": "string", "description": "YYYY-MM-DD"},
@@ -225,7 +275,7 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = [
     ),
     _build_tool(
         "get_daily_summary",
-        "指定日付のサマリーを生成して返します。日付が無い場合は today_date を利用してください。today_date 以外の日付は resolve_schedule_expression の結果を使ってください。",
+        "指定日付のサマリーを生成して返します。日付が無い場合は today_date を利用してください。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してください。",
         {"date": {"type": "string", "description": "YYYY-MM-DD"}},
     ),
 ]

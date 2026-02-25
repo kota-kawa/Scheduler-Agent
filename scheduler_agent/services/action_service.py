@@ -7,40 +7,41 @@ import json
 import re
 from typing import Any, Dict, List
 
-from llm_client import UnifiedClient, _content_to_text
 from sqlmodel import Session, select
 
 from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine, Step
 from scheduler_agent.services.schedule_parser_service import (
     _bool_from_value,
-    _is_relative_datetime_text,
+    _calc_date_offset,
+    _calc_month_boundary,
+    _calc_nearest_weekday,
+    _calc_time_offset,
+    _calc_week_range,
+    _calc_week_weekday,
+    _get_date_info,
     _normalize_hhmm,
     _parse_date,
-    _resolve_schedule_expression,
+    _requires_date_resolution,
     _try_parse_iso_date,
 )
 from scheduler_agent.services.timeline_service import get_weekday_routines
 
-READ_ONLY_ACTION_TYPES = {
-    "resolve_schedule_expression",
+_CALC_ACTION_TYPES = {
+    "calc_date_offset",
+    "calc_month_boundary",
+    "calc_nearest_weekday",
+    "calc_week_weekday",
+    "calc_week_range",
+    "calc_time_offset",
+    "get_date_info",
+}
+
+READ_ONLY_ACTION_TYPES = _CALC_ACTION_TYPES | {
     "get_day_log",
     "list_tasks_in_period",
     "get_daily_summary",
 }
 
-
-_REFERENCE_DATE_TOKENS = (
-    "その",
-    "それ",
-    "同日",
-    "当日",
-    "同じ日",
-    "その日",
-    "翌日",
-    "翌々日",
-    "前日",
-    "前々日",
-)
 
 
 _DELETE_ALL_ROUTINE_TOKENS = {
@@ -125,102 +126,7 @@ def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple
     return [], "none"
 
 
-def _has_reference_date_token(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    if not text:
-        return False
-    return any(token in text for token in _REFERENCE_DATE_TOKENS)
 
-
-def _parse_json_object_from_text(value: Any) -> Dict[str, Any]:
-    if not isinstance(value, str):
-        return {}
-    text = value.strip()
-    if not text:
-        return {}
-    if "```" in text:
-        text = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE).strip()
-    candidates: List[str] = []
-    if text.startswith("{") and text.endswith("}"):
-        candidates.append(text)
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            continue
-    return {}
-
-
-def _normalize_schedule_expression_with_llm(
-    expression: str,
-    base_date: datetime.date,
-    base_time: str,
-    default_time: str,
-    reference_date: datetime.date | None = None,
-) -> tuple[str | None, datetime.date | None]:
-    text = expression.strip() if isinstance(expression, str) else ""
-    if not text:
-        return None, None
-
-    try:
-        client = UnifiedClient()
-    except Exception:
-        return None, None
-
-    system_prompt = (
-        "あなたは日時表現の正規化器です。\n"
-        "入力の日時表現を、決定論的なパーサで解釈しやすい形へ言い換えてください。\n"
-        "出力は JSON のみで返してください。"
-    )
-    user_prompt = (
-        "次の日時表現を正規化してください。\n"
-        f"- expression: {text}\n"
-        f"- current_base_date: {base_date.isoformat()}\n"
-        f"- reference_date: {reference_date.isoformat() if reference_date else ''}\n"
-        f"- base_time: {base_time}\n"
-        f"- default_time: {default_time}\n"
-        "\n"
-        "要件:\n"
-        "1. 記念日/イベント名（例: ホワイトデー）は具体的な月日または YYYY-MM-DD に言い換える。\n"
-        "2. 「その3日後」「その翌日」など参照語を含む場合、reference_date があるなら base_date に設定する。\n"
-        "3. 意味が変わる推測はしない。確信がなければ expression は元文のまま。\n"
-        "4. JSON 形式: "
-        '{"normalized_expression":"...", "base_date":"YYYY-MM-DD or null"}'
-    )
-
-    try:
-        response = client.create(
-            model=client.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0,
-            max_tokens=240,
-        )
-    except Exception:
-        return None, None
-
-    response_text = _content_to_text(getattr(response.choices[0].message, "content", ""))
-    payload = _parse_json_object_from_text(response_text)
-    normalized_expression = payload.get("normalized_expression")
-    if not isinstance(normalized_expression, str) or not normalized_expression.strip():
-        normalized_expression = payload.get("expression")
-    expression_value = (
-        normalized_expression.strip()
-        if isinstance(normalized_expression, str) and normalized_expression.strip()
-        else None
-    )
-    normalized_base_date = _try_parse_iso_date(payload.get("base_date"))
-    return expression_value, normalized_base_date
 
 
 def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
@@ -228,8 +134,6 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
     errors = []
     modified_ids = []
     dirty = False
-    last_resolved_date: datetime.date | None = None
-    normalization_cache: Dict[tuple[str, str, str], tuple[str | None, datetime.date | None]] = {}
 
     if not isinstance(actions, list) or not actions:
         return results, errors, modified_ids
@@ -240,94 +144,107 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
             action_type = action.get("type")
 
-            if action_type == "resolve_schedule_expression":
-                expression = action.get("expression")
-                if not isinstance(expression, str) or not expression.strip():
-                    errors.append("resolve_schedule_expression: expression が指定されていません。")
+            # ---------- 原子的計算ツール ----------
+            if action_type == "calc_date_offset":
+                base_date_str = action.get("base_date")
+                base_date_val = _try_parse_iso_date(base_date_str)
+                if base_date_val is None:
+                    errors.append("calc_date_offset: base_date が不正です。YYYY-MM-DD で指定してください。")
                     continue
-                expression_text = expression.strip()
-                explicit_base_date = action.get("base_date")
-                has_explicit_base_date = _try_parse_iso_date(explicit_base_date) is not None
-                if _has_reference_date_token(expression_text) and not has_explicit_base_date and last_resolved_date:
-                    base_date_value = last_resolved_date
-                else:
-                    base_date_value = _parse_date(explicit_base_date, default_date)
-                fallback_base_time = datetime.datetime.now().strftime("%H:%M")
-                base_time_value = _normalize_hhmm(action.get("base_time"), fallback_base_time)
-                default_time_value = _normalize_hhmm(
-                    action.get("default_time"),
-                    base_time_value,
-                )
-                calc = _resolve_schedule_expression(
-                    expression=expression_text,
-                    base_date=base_date_value,
-                    base_time=base_time_value,
-                    default_time=default_time_value,
-                )
-                if not calc.get("ok"):
-                    cache_key = (
-                        expression_text,
-                        base_date_value.isoformat(),
-                        last_resolved_date.isoformat() if last_resolved_date else "",
-                    )
-                    normalized_expression, normalized_base_date = normalization_cache.get(
-                        cache_key,
-                        (None, None),
-                    )
-                    if cache_key not in normalization_cache:
-                        normalized_expression, normalized_base_date = _normalize_schedule_expression_with_llm(
-                            expression=expression_text,
-                            base_date=base_date_value,
-                            base_time=base_time_value,
-                            default_time=default_time_value,
-                            reference_date=last_resolved_date,
-                        )
-                        normalization_cache[cache_key] = (normalized_expression, normalized_base_date)
-                    retry_base_date = normalized_base_date or base_date_value
-                    should_retry = bool(normalized_expression) and (
-                        normalized_expression != expression_text or retry_base_date != base_date_value
-                    )
-                    if should_retry:
-                        retry_calc = _resolve_schedule_expression(
-                            expression=normalized_expression,
-                            base_date=retry_base_date,
-                            base_time=base_time_value,
-                            default_time=default_time_value,
-                        )
-                        if retry_calc.get("ok"):
-                            if normalized_expression and normalized_expression != expression_text:
-                                action["original_expression"] = expression_text
-                                action["expression"] = normalized_expression
-                                expression_text = normalized_expression
-                            if normalized_base_date and not has_explicit_base_date:
-                                action["base_date"] = normalized_base_date.isoformat()
-                            base_date_value = retry_base_date
-                            calc = retry_calc
-                if not calc.get("ok"):
-                    errors.append(
-                        "resolve_schedule_expression: "
-                        + str(calc.get("error") or "日時の計算に失敗しました。")
-                    )
+                try:
+                    offset = int(action.get("offset_days", 0))
+                except (TypeError, ValueError):
+                    errors.append("calc_date_offset: offset_days が整数ではありません。")
                     continue
-                resolved_date = _try_parse_iso_date(calc.get("date"))
-                if resolved_date is not None:
-                    last_resolved_date = resolved_date
-                period_text = ""
-                if calc.get("period_start") and calc.get("period_end"):
-                    period_text = (
-                        f" period_start={calc.get('period_start')}"
-                        f" period_end={calc.get('period_end')}"
-                    )
-                results.append(
-                    "計算結果: "
-                    f"expression={expression_text} "
-                    f"date={calc.get('date')} "
-                    f"weekday={calc.get('weekday', '')} "
-                    f"time={calc.get('time')} "
-                    f"datetime={calc.get('datetime')} "
-                    f"source={calc.get('source')}"
-                    f"{period_text}"
-                )
+                calc = _calc_date_offset(base_date_val, offset)
+                results.append(f"計算結果(calc_date_offset): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "calc_month_boundary":
+                try:
+                    year = int(action.get("year", 0))
+                    month = int(action.get("month", 0))
+                except (TypeError, ValueError):
+                    errors.append("calc_month_boundary: year/month が整数ではありません。")
+                    continue
+                boundary = str(action.get("boundary", "")).strip()
+                calc = _calc_month_boundary(year, month, boundary)
+                if not calc.get("ok"):
+                    errors.append(f"calc_month_boundary: {calc.get('error')}")
+                    continue
+                results.append(f"計算結果(calc_month_boundary): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "calc_nearest_weekday":
+                base_date_val = _try_parse_iso_date(action.get("base_date"))
+                if base_date_val is None:
+                    errors.append("calc_nearest_weekday: base_date が不正です。YYYY-MM-DD で指定してください。")
+                    continue
+                try:
+                    weekday = int(action.get("weekday", -1))
+                except (TypeError, ValueError):
+                    errors.append("calc_nearest_weekday: weekday が整数ではありません。")
+                    continue
+                direction = str(action.get("direction", "")).strip()
+                calc = _calc_nearest_weekday(base_date_val, weekday, direction)
+                if not calc.get("ok"):
+                    errors.append(f"calc_nearest_weekday: {calc.get('error')}")
+                    continue
+                results.append(f"計算結果(calc_nearest_weekday): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "calc_week_weekday":
+                base_date_val = _try_parse_iso_date(action.get("base_date"))
+                if base_date_val is None:
+                    errors.append("calc_week_weekday: base_date が不正です。YYYY-MM-DD で指定してください。")
+                    continue
+                try:
+                    week_offset = int(action.get("week_offset", 0))
+                    weekday = int(action.get("weekday", -1))
+                except (TypeError, ValueError):
+                    errors.append("calc_week_weekday: week_offset/weekday が整数ではありません。")
+                    continue
+                calc = _calc_week_weekday(base_date_val, week_offset, weekday)
+                if not calc.get("ok"):
+                    errors.append(f"calc_week_weekday: {calc.get('error')}")
+                    continue
+                results.append(f"計算結果(calc_week_weekday): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "calc_week_range":
+                base_date_val = _try_parse_iso_date(action.get("base_date"))
+                if base_date_val is None:
+                    errors.append("calc_week_range: base_date が不正です。YYYY-MM-DD で指定してください。")
+                    continue
+                calc = _calc_week_range(base_date_val)
+                results.append(f"計算結果(calc_week_range): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "calc_time_offset":
+                base_date_val = _try_parse_iso_date(action.get("base_date"))
+                if base_date_val is None:
+                    errors.append("calc_time_offset: base_date が不正です。YYYY-MM-DD で指定してください。")
+                    continue
+                base_time = str(action.get("base_time", "")).strip()
+                try:
+                    offset_min = int(action.get("offset_minutes", 0))
+                except (TypeError, ValueError):
+                    errors.append("calc_time_offset: offset_minutes が整数ではありません。")
+                    continue
+                calc = _calc_time_offset(base_date_val, base_time, offset_min)
+                if not calc.get("ok"):
+                    errors.append(f"calc_time_offset: {calc.get('error')}")
+                    continue
+                results.append(f"計算結果(calc_time_offset): {json.dumps(calc, ensure_ascii=False)}")
+                continue
+
+            if action_type == "get_date_info":
+                date_val = _try_parse_iso_date(action.get("date"))
+                if date_val is None:
+                    errors.append("get_date_info: date が不正です。YYYY-MM-DD で指定してください。")
+                    continue
+                calc = _get_date_info(date_val)
+                results.append(f"計算結果(get_date_info): {json.dumps(calc, ensure_ascii=False)}")
                 continue
 
             if action_type == "create_custom_task":
@@ -336,17 +253,17 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("create_custom_task: name が指定されていません。")
                     continue
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "create_custom_task: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日時へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日時へ変換してください。"
                     )
                     continue
                 raw_time_value = action.get("time")
-                if _is_relative_datetime_text(raw_time_value):
+                if _requires_date_resolution(raw_time_value):
                     errors.append(
                         "create_custom_task: time に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日時へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日時へ変換してください。"
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
@@ -392,10 +309,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "toggle_step: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
@@ -510,10 +427,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_log: content が指定されていません。")
                     continue
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "update_log: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
@@ -533,10 +450,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("append_day_log: content が指定されていません。")
                     continue
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "append_day_log: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
@@ -559,10 +476,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
             if action_type == "get_day_log":
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "get_day_log: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
@@ -773,10 +690,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
             if action_type == "list_tasks_in_period":
                 raw_start_date = action.get("start_date")
                 raw_end_date = action.get("end_date")
-                if _is_relative_datetime_text(raw_start_date) or _is_relative_datetime_text(raw_end_date):
+                if _requires_date_resolution(raw_start_date) or _requires_date_resolution(raw_end_date):
                     errors.append(
                         "list_tasks_in_period: 相対日付が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 start_date = _parse_date(raw_start_date, default_date)
@@ -828,10 +745,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
             if action_type == "get_daily_summary":
                 raw_date_value = action.get("date")
-                if _is_relative_datetime_text(raw_date_value):
+                if _requires_date_resolution(raw_date_value):
                     errors.append(
                         "get_daily_summary: date に相対表現が含まれています。"
-                        " resolve_schedule_expression で先に絶対日付へ変換してください。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
                     )
                     continue
                 target_date = _parse_date(raw_date_value, default_date)
@@ -889,4 +806,4 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
     return results, errors, modified_ids
 
 
-__all__ = ["READ_ONLY_ACTION_TYPES", "_apply_actions"]
+__all__ = ["READ_ONLY_ACTION_TYPES", "_CALC_ACTION_TYPES", "_apply_actions"]

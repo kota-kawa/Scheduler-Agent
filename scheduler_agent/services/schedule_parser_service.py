@@ -433,14 +433,136 @@ def _try_parse_iso_date(value: Any) -> datetime.date | None:
         return None
 
 
+_WEEKDAY_NAMES_JA = ["月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"]
+
+
+def _calc_date_offset(base_date: datetime.date, offset_days: int) -> Dict[str, Any]:
+    """base_date から offset_days 日後（負なら前）の日付を返す。"""
+    result = base_date + datetime.timedelta(days=offset_days)
+    return {
+        "ok": True,
+        "date": result.isoformat(),
+        "weekday": _WEEKDAY_NAMES_JA[result.weekday()],
+    }
+
+
+def _calc_month_boundary(year: int, month: int, boundary: str) -> Dict[str, Any]:
+    """指定月の月初(start)または月末(end)を返す。"""
+    if month < 1 or month > 12:
+        return {"ok": False, "error": f"month は 1〜12 で指定してください: {month}"}
+    if boundary == "start":
+        result = datetime.date(year, month, 1)
+    elif boundary == "end":
+        if month == 12:
+            result = datetime.date(year + 1, 1, 1) - datetime.timedelta(days=1)
+        else:
+            result = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
+    else:
+        return {"ok": False, "error": f"boundary は 'start' または 'end' を指定してください: {boundary}"}
+    return {
+        "ok": True,
+        "date": result.isoformat(),
+        "weekday": _WEEKDAY_NAMES_JA[result.weekday()],
+    }
+
+
+def _calc_nearest_weekday(
+    base_date: datetime.date, weekday: int, direction: str,
+) -> Dict[str, Any]:
+    """base_date から最も近い指定曜日を forward/backward で探す。当日が該当なら当日を返す。"""
+    if weekday < 0 or weekday > 6:
+        return {"ok": False, "error": f"weekday は 0(月)〜6(日) で指定してください: {weekday}"}
+    current_wd = base_date.weekday()
+    if current_wd == weekday:
+        return {"ok": True, "date": base_date.isoformat(), "weekday": _WEEKDAY_NAMES_JA[weekday]}
+    if direction == "forward":
+        diff = (weekday - current_wd) % 7
+    elif direction == "backward":
+        diff = -((current_wd - weekday) % 7)
+    else:
+        return {"ok": False, "error": f"direction は 'forward' または 'backward' を指定してください: {direction}"}
+    result = base_date + datetime.timedelta(days=diff)
+    return {"ok": True, "date": result.isoformat(), "weekday": _WEEKDAY_NAMES_JA[result.weekday()]}
+
+
+def _calc_week_weekday(
+    base_date: datetime.date, week_offset: int, weekday: int,
+) -> Dict[str, Any]:
+    """base_date の週から week_offset 週後(負なら前)の指定曜日を返す。"""
+    if weekday < 0 or weekday > 6:
+        return {"ok": False, "error": f"weekday は 0(月)〜6(日) で指定してください: {weekday}"}
+    current_monday = base_date - datetime.timedelta(days=base_date.weekday())
+    target_monday = current_monday + datetime.timedelta(weeks=week_offset)
+    result = target_monday + datetime.timedelta(days=weekday)
+    return {"ok": True, "date": result.isoformat(), "weekday": _WEEKDAY_NAMES_JA[result.weekday()]}
+
+
+def _calc_week_range(base_date: datetime.date) -> Dict[str, Any]:
+    """base_date が含まれる週の月曜〜日曜の範囲を返す。"""
+    monday = base_date - datetime.timedelta(days=base_date.weekday())
+    sunday = monday + datetime.timedelta(days=6)
+    return {
+        "ok": True,
+        "period_start": monday.isoformat(),
+        "period_start_weekday": _WEEKDAY_NAMES_JA[monday.weekday()],
+        "period_end": sunday.isoformat(),
+        "period_end_weekday": _WEEKDAY_NAMES_JA[sunday.weekday()],
+    }
+
+
+def _calc_time_offset(
+    base_date: datetime.date, base_time: str, offset_minutes: int,
+) -> Dict[str, Any]:
+    """base_date + base_time から offset_minutes 分加減算する。日跨ぎも対応。"""
+    normalized = _normalize_hhmm(base_time, "")
+    if not normalized:
+        return {"ok": False, "error": f"base_time の形式が不正です: {base_time}"}
+    hour, minute = (int(p) for p in normalized.split(":"))
+    base_dt = datetime.datetime.combine(base_date, datetime.time(hour, minute))
+    result_dt = base_dt + datetime.timedelta(minutes=offset_minutes)
+    return {
+        "ok": True,
+        "date": result_dt.date().isoformat(),
+        "time": result_dt.strftime("%H:%M"),
+        "weekday": _WEEKDAY_NAMES_JA[result_dt.weekday()],
+    }
+
+
+def _get_date_info(target_date: datetime.date) -> Dict[str, Any]:
+    """日付の曜日等の情報を返す。"""
+    return {
+        "ok": True,
+        "date": target_date.isoformat(),
+        "weekday": _WEEKDAY_NAMES_JA[target_date.weekday()],
+        "year": target_date.year,
+        "month": target_date.month,
+        "day": target_date.day,
+    }
+
+
+def _requires_date_resolution(value: Any) -> bool:
+    """YYYY-MM-DD 形式でなければ日付解決が必要と判定する。"""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return re.fullmatch(r"\d{4}-\d{2}-\d{2}", value.strip()) is None
+
+
 __all__ = [
     "_parse_date",
     "_normalize_hhmm",
     "_resolve_schedule_expression",
     "_is_relative_datetime_text",
+    "_requires_date_resolution",
     "_bool_from_value",
     "_extract_weekday",
     "_extract_relative_week_shift",
     "_week_bounds",
     "_try_parse_iso_date",
+    "_calc_date_offset",
+    "_calc_month_boundary",
+    "_calc_nearest_weekday",
+    "_calc_week_weekday",
+    "_calc_week_range",
+    "_calc_time_offset",
+    "_get_date_info",
 ]

@@ -109,7 +109,6 @@ def _run_scheduler_multi_step(
     chat_service_module.call_scheduler_llm = call_scheduler_llm
     chat_service_module._build_scheduler_context = _build_scheduler_context
     chat_service_module._apply_actions = _apply_actions
-    chat_service_module._resolve_schedule_expression = _resolve_schedule_expression
     return chat_service_module._run_scheduler_multi_step(db, formatted_messages, today, max_rounds)
 
 
