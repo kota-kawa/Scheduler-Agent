@@ -1,0 +1,139 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fast:
+    name: Fast Tests
+    runs-on: ubuntu-latest
+    env:
+      SESSION_SECRET: ci-test-secret
+      DATABASE_URL: postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-cov
+
+      - name: Run fast tests
+        run: |
+          mkdir -p reports
+          pytest -q tests/test_architecture_imports.py tests/test_ci_smoke.py --junitxml=reports/fast-junit.xml
+
+      - name: Upload fast junit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-junit
+          path: reports/fast-junit.xml
+
+  postgres-integration:
+    name: Postgres Integration + Coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: scheduler_test
+          POSTGRES_USER: scheduler
+          POSTGRES_PASSWORD: scheduler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U scheduler -d scheduler_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      SESSION_SECRET: ci-test-secret
+      TEST_DATABASE_URL: postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
+      DATABASE_URL: postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-cov
+
+      - name: Wait for PostgreSQL
+        run: |
+          python - <<'PY'
+          import os
+          import time
+
+          import psycopg2
+
+          dsn = os.environ["TEST_DATABASE_URL"]
+          last_error = None
+
+          for _ in range(30):
+              try:
+                  conn = psycopg2.connect(dsn)
+                  conn.close()
+                  print("PostgreSQL is ready.")
+                  raise SystemExit(0)
+              except Exception as exc:
+                  last_error = exc
+                  time.sleep(2)
+
+          raise SystemExit(f"PostgreSQL did not become ready in time: {last_error}")
+          PY
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p reports
+          pytest -q \
+            --junitxml=reports/junit.xml \
+            --cov=scheduler_agent \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage.xml \
+            tests/test_architecture_imports.py \
+            tests/test_ci_smoke.py \
+            tests/test_ci_postgres_smoke.py
+
+      - name: Fail if tests were skipped
+        if: always()
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          tree = ET.parse("reports/junit.xml")
+          root = tree.getroot()
+          skipped = 0
+          for suite in root.iter("testsuite"):
+            skipped += int(suite.attrib.get("skipped", "0"))
+
+          if skipped > 0:
+            print(f"Found skipped tests: {skipped}")
+            sys.exit(1)
+
+          print("No skipped tests detected.")
+          PY
+
+      - name: Upload integration reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-reports
+          path: reports
