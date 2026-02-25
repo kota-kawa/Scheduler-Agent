@@ -36,6 +36,7 @@ from scheduler_agent.services.timeline_service import _build_scheduler_context
 # the calc tools must execute first so the LLM can use the calculated result.
 _DATE_DEPENDENT_ACTION_TYPES = {
     "create_custom_task",
+    "create_tasks_in_range",
     "toggle_step",
     "update_log",
     "append_day_log",
