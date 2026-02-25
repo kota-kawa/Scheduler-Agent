@@ -281,6 +281,51 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 dirty = True
                 continue
 
+            if action_type == "create_tasks_in_range":
+                name = action.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    errors.append("create_tasks_in_range: name が指定されていません。")
+                    continue
+                raw_start = action.get("start_date")
+                raw_end = action.get("end_date")
+                if _requires_date_resolution(raw_start) or _requires_date_resolution(raw_end):
+                    errors.append(
+                        "create_tasks_in_range: 日付に相対表現が含まれています。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                start_val = _try_parse_iso_date(raw_start)
+                end_val = _try_parse_iso_date(raw_end)
+                if start_val is None or end_val is None:
+                    errors.append("create_tasks_in_range: start_date / end_date が YYYY-MM-DD 形式ではありません。")
+                    continue
+                if start_val > end_val:
+                    errors.append("create_tasks_in_range: start_date が end_date より後です。")
+                    continue
+                span = (end_val - start_val).days + 1
+                if span > 365:
+                    errors.append("create_tasks_in_range: 期間が長すぎます（最大365日）。")
+                    continue
+                raw_time_value = action.get("time")
+                time_value = raw_time_value if isinstance(raw_time_value, str) and raw_time_value.strip() else "00:00"
+                memo = action.get("memo") if isinstance(action.get("memo"), str) else ""
+                added_dates = []
+                cur = start_val
+                while cur <= end_val:
+                    new_task = CustomTask(
+                        date=cur, name=name.strip(), time=time_value.strip(), memo=memo.strip()
+                    )
+                    db.add(new_task)
+                    added_dates.append(cur.isoformat())
+                    cur += datetime.timedelta(days=1)
+                db.flush()
+                results.append(
+                    f"「{name.strip()}」を {start_val.isoformat()} から {end_val.isoformat()} まで {span} 件登録しました。"
+                )
+                modified_ids.extend([f"item_custom_{d}" for d in added_dates])
+                dirty = True
+                continue
+
             if action_type == "delete_custom_task":
                 task_id = action.get("task_id")
                 try:
@@ -295,6 +340,42 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 db.delete(task_obj)
                 results.append(f"カスタムタスク「{task_obj.name}」を削除しました。")
                 dirty = True
+                continue
+
+            if action_type == "delete_tasks_in_range":
+                raw_start = action.get("start_date")
+                raw_end = action.get("end_date")
+                if _requires_date_resolution(raw_start) or _requires_date_resolution(raw_end):
+                    errors.append(
+                        "delete_tasks_in_range: 日付に相対表現が含まれています。"
+                        " 計算ツール(calc_*)で先に絶対日付へ変換してください。"
+                    )
+                    continue
+                start_val = _try_parse_iso_date(raw_start)
+                end_val = _try_parse_iso_date(raw_end)
+                if start_val is None or end_val is None:
+                    errors.append("delete_tasks_in_range: start_date / end_date が YYYY-MM-DD 形式ではありません。")
+                    continue
+                if start_val > end_val:
+                    errors.append("delete_tasks_in_range: start_date が end_date より後です。")
+                    continue
+                tasks_to_delete = db.exec(
+                    select(CustomTask)
+                    .where(CustomTask.date.between(start_val, end_val))
+                ).all()
+                count = len(tasks_to_delete)
+                for t in tasks_to_delete:
+                    db.delete(t)
+                if count > 0:
+                    results.append(
+                        f"{start_val.isoformat()} から {end_val.isoformat()} までのカスタムタスク {count} 件を削除しました。"
+                    )
+                    modified_ids.append("task-list")
+                    dirty = True
+                else:
+                    results.append(
+                        f"{start_val.isoformat()} から {end_val.isoformat()} までに削除対象のタスクはありませんでした。"
+                    )
                 continue
 
             if action_type == "toggle_step":

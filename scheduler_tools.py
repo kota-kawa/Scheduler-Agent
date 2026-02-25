@@ -102,7 +102,7 @@ _DATE_CALC_TOOLS: List[Dict[str, Any]] = [
 SCHEDULER_TOOLS: List[Dict[str, Any]] = _DATE_CALC_TOOLS + [
     _build_tool(
         "create_custom_task",
-        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を追加します。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
+        "日付・時間・名前を指定してカスタムタスク（予定・スケジュール）を1件追加します。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
         {
             "date": {"type": "string", "description": "YYYY-MM-DD"},
             "name": {"type": "string", "description": "タスク名"},
@@ -112,10 +112,31 @@ SCHEDULER_TOOLS: List[Dict[str, Any]] = _DATE_CALC_TOOLS + [
         required=["name"],
     ),
     _build_tool(
+        "create_tasks_in_range",
+        "開始日から終了日まで（両端含む）毎日、同じ名前・時間のタスクを一括登録します。「〇〇から〇〇まで旅行」「〇〇〜〇〇連続予定」など期間を跨ぐ予定に使います。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
+        {
+            "start_date": {"type": "string", "description": "開始日 YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "終了日 YYYY-MM-DD（含む）"},
+            "name": {"type": "string", "description": "タスク名"},
+            "time": {"type": "string", "description": "HH:MM (24時間表記)"},
+            "memo": {"type": "string", "description": "任意のメモ"},
+        },
+        required=["start_date", "end_date", "name"],
+    ),
+    _build_tool(
         "delete_custom_task",
-        "指定したIDのカスタムタスクを削除します。",
+        "指定したIDのカスタムタスクを1件削除します。",
         {"task_id": {"type": "integer", "description": "カスタムタスクID"}},
         required=["task_id"],
+    ),
+    _build_tool(
+        "delete_tasks_in_range",
+        "開始日から終了日まで（両端含む）の期間に存在するカスタムタスクをすべて削除します。「来週の予定を全部消して」「〇〇から〇〇までの予定を削除」など期間指定の一括削除に使います。日付は YYYY-MM-DD 形式で指定。today_date 以外の日付は必ず先に計算ツール(calc_*)で算出してから指定してください。",
+        {
+            "start_date": {"type": "string", "description": "開始日 YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "終了日 YYYY-MM-DD（含む）"},
+        },
+        required=["start_date", "end_date"],
     ),
     _build_tool(
         "toggle_step",

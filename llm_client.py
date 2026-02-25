@@ -489,20 +489,22 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     current_time_jp = now.strftime("%Y年%m月%d日 (%A) %H時%M分%S秒")
     current_time_iso = now.isoformat(timespec="seconds")
 
-    # Build weekday calendar for this week and next week
+    # Build weekday calendar for this week and next 3 weeks (28 days total)
     _weekday_names_ja = ["月", "火", "水", "木", "金", "土", "日"]
     _today = now.date()
     _current_weekday_ja = _weekday_names_ja[_today.weekday()]
     _this_monday = _today - timedelta(days=_today.weekday())
-    _next_monday = _this_monday + timedelta(days=7)
-    _this_week_cal = " / ".join(
-        f"{_weekday_names_ja[i]}={(_this_monday + timedelta(days=i)).strftime('%m/%d')}"
-        for i in range(7)
-    )
-    _next_week_cal = " / ".join(
-        f"{_weekday_names_ja[i]}={(_next_monday + timedelta(days=i)).strftime('%m/%d')}"
-        for i in range(7)
-    )
+
+    def _build_week_cal(monday: "datetime.date") -> str:
+        return " / ".join(
+            f"{_weekday_names_ja[i]}={( monday + timedelta(days=i)).strftime('%Y-%m-%d')}"
+            for i in range(7)
+        )
+
+    _this_week_cal   = _build_week_cal(_this_monday)
+    _next_week_cal   = _build_week_cal(_this_monday + timedelta(weeks=1))
+    _week2_cal       = _build_week_cal(_this_monday + timedelta(weeks=2))
+    _week3_cal       = _build_week_cal(_this_monday + timedelta(weeks=3))
 
     # Sanitize inputs to prevent hallucination of tool formats
     context = _sanitize_text(context)
@@ -516,8 +518,12 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     base_system_prompt = (
         f"現在日時: {current_time_jp} / {current_time_iso}\n"
         f"今日: {_today.isoformat()} ({_current_weekday_ja}曜日)\n"
-        f"今週: {_this_week_cal}\n"
-        f"来週: {_next_week_cal}\n"
+        f"今週  (W+0): {_this_week_cal}\n"
+        f"来週  (W+1): {_next_week_cal}\n"
+        f"再来週(W+2): {_week2_cal}\n"
+        f"3週後 (W+3): {_week3_cal}\n"
+        "※ 上記カレンダーの範囲内の日付は正確な曜日を参照できます。\n"
+        "※ ただし計算・登録・確認の際は必ず calc_* / get_date_info ツールを使い、暗算禁止。\n"
         "\n"
         "あなたはユーザーの生活リズムを整え、日々のタスク管理をサポートする、親しみやすく頼れるパートナーAIです。\n"
         "ユーザーの自然言語による指示を解釈し、適切なツールを選択して、ルーチンの管理、カスタムタスク（予定）の操作、日報（Daily Log）の記録を行います。\n"
@@ -525,7 +531,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "## コンテキストとデータの取り扱い\n"
         "1. **現在のコンテキスト**: 提供されたコンテキストには「今日」のデータ（ルーチン、タスク、ログ）のみが含まれています。\n"
         "2. **日付指定の検索**: 「明日」「来週」「昨日」などのデータが必要な場合は、推測せずに必ず `list_tasks_in_period` や `get_day_log`、`get_daily_summary` を使用して取得してください。\n"
-        "3. **今日以外の日付は必ず計算ツールで算出**: ユーザー入力が今日以外の日付を指す場合（相対表現・曜日指定・明示日付を含む）は、参照/更新の前に必ず計算ツール（`calc_date_offset`, `calc_month_boundary`, `calc_nearest_weekday`, `calc_week_weekday`, `calc_week_range`, `calc_time_offset`, `get_date_info`）を呼んで絶対値（YYYY-MM-DD）を確定してください。LLMが自力で日付を計算することは禁止です。\n"
+        "3. **今日以外の日付は必ず計算ツールで算出**: ユーザー入力が今日以外の日付を指す場合（相対表現・曜日指定・明示日付を含む）は、参照/更新の前に必ず計算ツール（`calc_date_offset`, `calc_month_boundary`, `calc_nearest_weekday`, `calc_week_weekday`, `calc_week_range`, `calc_time_offset`, `get_date_info`）を呼んで絶対値（YYYY-MM-DD）を確定してください。**ユーザーへの確認メッセージでも日付・曜日を述べる前に必ずツールで確認すること。暗算・記憶からの推測は禁止です。**\n"
         "4. **IDの厳守（ルーチン削除は例外あり）**: タスクやステップの完了・削除・編集、ルーチン曜日変更、ステップ編集では、必ずコンテキストに含まれる `id` (例: `step_id`, `task_id`, `routine_id`) を正確に使用してください。\n"
         "    - **ルーチン削除の例外**: `delete_routine` は `routine_id` が最優先ですが、ID不明なら `routine_name` で削除して構いません。\n"
         "    - **全件削除**: 「すべてのルーチンを削除」は `delete_routine` に `scope=\"all\"` または `all=true` を指定してください。\n"
@@ -545,17 +551,33 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "- `calc_week_weekday(base_date, week_offset, weekday)`: N週後の指定曜日。例: 来週火曜→week_offset=1, weekday=1\n"
         "- `calc_week_range(base_date)`: 週の月-日範囲。例: 来週の予定確認→来週の任意日をbase_dateに\n"
         "- `calc_time_offset(base_date, base_time, offset_minutes)`: 時刻の加減算。例: 2時間後→offset_minutes=120\n"
-        "- `get_date_info(date)`: 日付の曜日等を検算。\n"
+        "- `get_date_info(date)`: 日付の曜日等を検算。**ユーザーへの確認メッセージで日付を提示するときも必ずこのツールで曜日を確認してから述べること。**\n"
+        "\n"
+        "### 確認が必要な場合のフロー\n"
+        "ユーザーへの確認メッセージで日付・曜日を伝える場合：\n"
+        "1. まず計算ツールを呼んで日付を確定する（暗算不可）\n"
+        "2. 必要なら `get_date_info` で曜日を確認する\n"
+        "3. その結果をもとにユーザーへ「〇月〇日（〇曜日）でよろしいですか？」と確認する\n"
+        "→ **ツールを呼ぶ前に曜日を述べることは禁止**\n"
         "\n"
         "### 計算の組み合わせ例\n"
         f"- 「来月末の金曜」→ ①calc_month_boundary(year, month, 'end') → ②calc_nearest_weekday(①の結果date, 4, 'backward')\n"
         f"- 「その3日後」→ calc_date_offset(直前の計算結果date, 3)\n"
         f"- 「来週の予定」→ ①calc_week_weekday(today, 1, 0)で来週月曜を取得 → ②calc_week_range(①の結果date) → list_tasks_in_period(period_start, period_end)\n"
         "\n"
+        "### 日付表現の解釈ルール（重要）\n"
+        "- **「〇日」は月の日付**。「来週の4日」「今月の15日」など「〇日」が数字のみの場合は**月の何日か**（date of month）を意味します。週の何番目の曜日ではありません。\n"
+        "  - 例: 「来週の4日」→ 今月または来月の4日（3月4日など）。`get_date_info('YYYY-MM-04')` で確認。\n"
+        "  - 例: 「来週の火曜」→ 週の曜日指定。`calc_week_weekday(today, 1, 1)` を使用。\n"
+        "- **「〇日」と「〇曜日」は別物**。「4日」は日付、「木曜」は曜日です。混同しないでください。\n"
+        "- **期間表現の「まで」は当日を含む**。「〇日まで」はその日を含めた期間です。\n"
+        "\n"
         "### その他のルール\n"
         "- コンテキストやフィードバックに `resolved_datetime_memory` がある場合は、その値を再利用し、同じ計算を繰り返さないでください。\n"
         "- 記念日やイベント名（例: ホワイトデー）はモデルの一般知識で具体的な月日に展開し、計算ツールに渡してください。\n"
         "- **週単位の確認**: 「来週の予定」「今週のタスク一覧」など曜日を含まない週指定は1日ではなく1週間全体です。`calc_week_range` で範囲を取得してから `list_tasks_in_period` を使ってください。\n"
+        "- **期間を跨ぐ予定の削除**: 「来週の予定を全部消して」「〇〇から〇〇までの予定を削除」は `delete_tasks_in_range` を使います。先に `calc_week_range` などで日付範囲を確定してから渡してください。\n"
+        "- **期間を跨ぐ予定の登録**: 「〇〇から〇〇まで旅行」「〇〇〜〇〇連続予定」は `create_tasks_in_range` で一括登録してください。`create_custom_task` を日数分繰り返す必要はありません。\n"
         "- **予定・スケジュール**: 外部カレンダーは使用しません。「〇〇の予定を入れて」は `create_custom_task` を使用します。\n"
         "- **習慣・繰り返し**: 「毎週〇曜日に～する」は `add_routine` を使用します。\n"
         "- **ルーチン削除**: `delete_routine` を使います。`routine_id` が取れる場合はID指定、取れない場合は `routine_name` を使います。「全部/すべて」は `scope=\"all\"` または `all=true` を使います。\n"
@@ -572,6 +594,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         "- **明確な報告**: ツールを実行した結果は、必ずユーザーに日本語で報告してください。「〇〇を登録しました！」「××を完了にしましたお疲れ様です！」など。\n"
         "- **不明確な指示への対応**: 必要な情報（時間、名前など）が不足している場合は、デフォルト値で強行せず、優しく聞き返してください。ただし日付が省略された場合は「今日」とみなして進めて構いません。\n"
         "- **JSON禁止**: ユーザーへの返答（reply）には生のJSONやツールコール定義を含めず、自然な文章のみを返してください。\n"
+        "- **エラー非開示・捏造禁止**: ツール実行エラーや内部エラーメッセージはユーザーに見せないでください。**存在しないコマンドや手順を捏造してユーザーに提示することは絶対禁止です。** 問題が解決しない場合のみ「うまく処理できませんでした、もう一度お試しください」と簡潔に伝えてください。\n"
     )
 
     last_exception = None
