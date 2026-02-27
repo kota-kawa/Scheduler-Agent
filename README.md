@@ -35,6 +35,22 @@ Click a thumbnail to open the video on YouTube.
 
 **Scheduler Agent** is an AI-powered scheduling assistant that helps you manage routines and one-off tasks through a simple chat experience. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized.
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+  user[User Browser] --> ui[React SPA / Jinja UI]
+  ui --> api[FastAPI app.py]
+  api --> orm[SQLAlchemy Models]
+  orm --> db[(PostgreSQL)]
+  api --> selector[model_selection.py]
+  selector --> llm[llm_client.py]
+  llm --> openai[OpenAI]
+  llm --> claude[Anthropic Claude]
+  llm --> gemini[Google Gemini]
+  llm --> groq[Groq]
+```
+
 ---
 
 ## 🚀 Quick start (Docker Compose only)
@@ -168,6 +184,22 @@ This project is released under the [MIT License](LICENSE.md).
 
 **Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
 「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
+
+## 🏗️ アーキテクチャ
+
+```mermaid
+flowchart LR
+  user[ユーザーのブラウザ] --> ui[React SPA / Jinja UI]
+  ui --> api[FastAPI app.py]
+  api --> orm[SQLAlchemy モデル]
+  orm --> db[(PostgreSQL)]
+  api --> selector[model_selection.py]
+  selector --> llm[llm_client.py]
+  llm --> openai[OpenAI]
+  llm --> claude[Anthropic Claude]
+  llm --> gemini[Google Gemini]
+  llm --> groq[Groq]
+```
 
 ---
 
