@@ -9,34 +9,41 @@ from scheduler_agent.core.db import get_db
 from scheduler_agent.services.timeline_service import get_weekday_routines
 from scheduler_agent.web import handlers as web_handlers
 
+# 日本語: ルーチンCRUD API群 / English: Routine CRUD router
 router = APIRouter()
 
 
 @router.get("/api/routines/day/{weekday}", name="api_routines_by_day")
 def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
+    # 日本語: 曜日別ルーチン取得 / English: Fetch routines by weekday
     return web_handlers.api_routines_by_day(weekday, db, get_weekday_routines_fn=get_weekday_routines)
 
 
 @router.get("/api/routines", name="api_routines")
 def api_routines(db: Session = Depends(get_db)):
+    # 日本語: 全ルーチン取得 / English: Fetch all routines
     return web_handlers.api_routines(db)
 
 
 @router.post("/routines/add", name="add_routine")
 async def add_routine(request: Request, db: Session = Depends(get_db)):
+    # 日本語: ルーチン追加 / English: Add routine
     return await web_handlers.add_routine(request, db)
 
 
 @router.post("/routines/{id}/delete", name="delete_routine")
 def delete_routine(request: Request, id: int, db: Session = Depends(get_db)):
+    # 日本語: ルーチン削除 / English: Delete routine
     return web_handlers.delete_routine(request, id, db)
 
 
 @router.post("/routines/{id}/step/add", name="add_step")
 async def add_step(request: Request, id: int, db: Session = Depends(get_db)):
+    # 日本語: ステップ追加 / English: Add step
     return await web_handlers.add_step(request, id, db)
 
 
 @router.post("/steps/{id}/delete", name="delete_step")
 def delete_step(request: Request, id: int, db: Session = Depends(get_db)):
+    # 日本語: ステップ削除 / English: Delete step
     return web_handlers.delete_step(request, id, db)

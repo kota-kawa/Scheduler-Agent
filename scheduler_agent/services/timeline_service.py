@@ -11,6 +11,7 @@ from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine
 
 
 def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
+    # 日本語: days カラム(カンマ区切り)から該当曜日のルーチンを抽出 / English: Filter routines by weekday using comma-separated days column
     all_routines = db.exec(select(Routine)).all()
     matched = []
     for routine in all_routines:
@@ -20,6 +21,7 @@ def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
 
 
 def _get_timeline_data(db: Session, date_obj: datetime.date):
+    # 日本語: 指定日のルーチンステップ+カスタムタスクを時系列で構築 / English: Build chronological timeline from routine steps and custom tasks
     routines = get_weekday_routines(db, date_obj.weekday())
     custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
 
@@ -29,6 +31,7 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
 
     for routine in routines:
         for step in routine.steps:
+            # 日本語: ステップごとの当日ログを紐づける / English: Attach per-step daily log for the target date
             log = db.exec(
                 select(DailyLog).where(DailyLog.date == date_obj, DailyLog.step_id == step.id)
             ).first()
@@ -47,6 +50,7 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
                 completed_items += 1
 
     for task in custom_tasks:
+        # 日本語: カスタムタスクをルーチンと同じ表示スキーマに合わせる / English: Normalize custom tasks into the same display schema
         timeline_items.append(
             {
                 "type": "custom",
@@ -72,6 +76,7 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
 
 
 def _build_scheduler_context(db: Session, today: datetime.date | None = None) -> str:
+    # 日本語: LLM が参照する「本日中心」の状態テキストを生成 / English: Build "today-focused" context text for LLM consumption
     today = today or datetime.date.today()
     routines = db.exec(select(Routine)).all()
     today_logs = {
@@ -81,6 +86,7 @@ def _build_scheduler_context(db: Session, today: datetime.date | None = None) ->
 
     recent_day_logs = []
     for i in range(3):
+        # 日本語: 直近3日の日報を補助コンテキストとして添付 / English: Include recent 3-day logs as auxiliary context
         date_value = today - datetime.timedelta(days=i)
         day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
         if day_log and day_log.content:
@@ -88,6 +94,7 @@ def _build_scheduler_context(db: Session, today: datetime.date | None = None) ->
 
     routine_lines = []
     for routine in routines:
+        # 日本語: ルーチンは step 時刻順で安定表示 / English: Sort routine steps by time for stable output
         days_label = routine.days or ""
         steps = (
             ", ".join(
@@ -111,6 +118,7 @@ def _build_scheduler_context(db: Session, today: datetime.date | None = None) ->
         log_lines.append(f"- StepLog step_id={step_id} done={log.done}{memo}")
 
     context_parts = [
+        # 日本語: LLMプロンプトにそのまま埋め込めるプレーンテキスト形式 / English: Plain text structure designed for direct prompt injection
         f"today_date: {today.isoformat()}",
         "routines:",
         *routine_lines,

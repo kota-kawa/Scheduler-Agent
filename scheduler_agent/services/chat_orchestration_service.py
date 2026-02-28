@@ -47,9 +47,8 @@ _DATE_DEPENDENT_ACTION_TYPES = {
 }
 
 
-
-
 def _action_signature(actions: List[Dict[str, Any]]) -> str:
+    # 日本語: アクション配列の比較用シグネチャを生成 / English: Build comparable signature for an action batch
     signatures: List[str] = []
     for action in actions:
         if not isinstance(action, dict):
@@ -62,6 +61,7 @@ def _action_signature(actions: List[Dict[str, Any]]) -> str:
 
 
 def _action_fingerprint(action: Dict[str, Any]) -> str:
+    # 日本語: 単一アクション重複検知用の指紋 / English: Fingerprint for deduplicating individual actions
     if not isinstance(action, dict):
         return ""
     try:
@@ -71,6 +71,7 @@ def _action_fingerprint(action: Dict[str, Any]) -> str:
 
 
 def _dedupe_modified_ids(modified_ids: List[Any]) -> List[str]:
+    # 日本語: modified_ids を順序維持で重複排除 / English: Deduplicate modified IDs while preserving order
     unique: List[str] = []
     seen: set[str] = set()
     for item in modified_ids:
@@ -84,6 +85,7 @@ def _dedupe_modified_ids(modified_ids: List[Any]) -> List[str]:
 
 
 def _get_last_user_message_from_messages(formatted_messages: List[Dict[str, str]]) -> str:
+    # 日本語: メッセージ列から最後の user 発話を取得 / English: Extract last user utterance from message list
     for message in reversed(formatted_messages or []):
         if isinstance(message, dict) and message.get("role") == "user":
             content = message.get("content", "")
@@ -92,6 +94,7 @@ def _get_last_user_message_from_messages(formatted_messages: List[Dict[str, str]
 
 
 def _is_week_scope_confirmation_request(user_message: str) -> bool:
+    # 日本語: 「来週の予定確認」等の週全体確認意図を判定 / English: Detect week-scope confirmation intent (e.g., "show next week schedule")
     if not isinstance(user_message, str):
         return False
     text = user_message.strip()
@@ -124,6 +127,7 @@ def _normalize_actions_for_week_scope_confirmation(
     actions: List[Dict[str, Any]],
     user_message: str,
 ) -> List[Dict[str, Any]]:
+    # 日本語: 週確認意図では1日照会を週範囲照会に補正 / English: Normalize day-level queries into week-range queries when intent is weekly
     if not _is_week_scope_confirmation_request(user_message):
         return actions
 
@@ -169,9 +173,8 @@ def _normalize_actions_for_week_scope_confirmation(
 
     return normalized
 
-
-
 def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
+    # 日本語: ユーザー文から期待される操作ステップを推定 / English: Infer expected action stages from user message
     if not isinstance(user_message, str) or not user_message.strip():
         return []
 
@@ -243,6 +246,7 @@ def _infer_requested_steps(user_message: str) -> List[Dict[str, Any]]:
 
 
 def _format_step_progress(steps: List[Dict[str, Any]], completed_steps: int) -> str:
+    # 日本語: 進捗状態を LLM フィードバック用テキストへ整形 / English: Format inferred-step progress for LLM feedback
     if not steps:
         return "(none)"
 
@@ -268,6 +272,7 @@ def _extract_resolved_memory_from_actions(
     actions: List[Dict[str, Any]],
     default_date: datetime.date,
 ) -> List[Dict[str, str]]:
+    # 日本語: calc_* 実行結果を次ラウンド再利用用メモリへ抽出 / English: Extract calc-tool results for reuse in subsequent rounds
     """Extract calculation results from atomic calc tool actions for memory."""
     from scheduler_agent.services.schedule_parser_service import (
         _calc_date_offset,
@@ -377,6 +382,7 @@ def _build_round_feedback(
     duplicate_warning: str = "",
     deferred_actions: List[Dict[str, Any]] | None = None,
 ) -> str:
+    # 日本語: 実行結果を次ラウンドの system フィードバックに変換 / English: Build system feedback for the next orchestration round
     action_lines = "\n".join(
         f"- {json.dumps(action, ensure_ascii=False, sort_keys=True)}" for action in actions
     ) or "- (none)"
@@ -444,6 +450,7 @@ def _run_scheduler_multi_step(
         tuple[List[str], List[str], List[str]],
     ] = _apply_actions,
 ) -> Dict[str, Any]:
+    # 日本語: LLM提案とツール実行を複数ラウンドで調停 / English: Orchestrate multi-round loop between LLM proposals and tool execution
     rounds_limit = max_rounds if isinstance(max_rounds, int) and max_rounds > 0 else get_max_action_rounds()
     working_messages = list(formatted_messages)
     user_message = _get_last_user_message_from_messages(formatted_messages)
@@ -466,6 +473,7 @@ def _run_scheduler_multi_step(
     max_same_read_action_streak = get_max_same_read_action_streak()
 
     if inferred_steps:
+        # 日本語: 推定ステップ順序を system メッセージとして注入 / English: Inject inferred step order as a planning system message
         planning_message = (
             "requested_steps_plan:\n"
             f"{_format_step_progress(inferred_steps, completed_steps)}\n"
@@ -474,6 +482,7 @@ def _run_scheduler_multi_step(
         working_messages = [*working_messages, {"role": "system", "content": planning_message}]
 
     for round_index in range(1, rounds_limit + 1):
+        # 日本語: 各ラウンドで最新DB状態からコンテキストを再構築 / English: Rebuild scheduler context from latest DB state each round
         context = build_scheduler_context_fn(db, today)
 
         try:
@@ -493,6 +502,7 @@ def _run_scheduler_multi_step(
         # Split batch: if calc tools are mixed with date-dependent
         # actions, execute only calc (+ non-date-dependent) first so the LLM
         # receives the calculated result before specifying dates for other tools.
+        # 日本語: calc_* と日付依存操作が混在したら前者を先行実行 / English: Prioritize calc_* actions when mixed with date-dependent writes
         deferred_actions: List[Dict[str, Any]] = []
         has_calc = any(
             str(a.get("type", "")) in _CALC_ACTION_TYPES for a in current_actions
@@ -517,6 +527,7 @@ def _run_scheduler_multi_step(
         )
         signature = _action_signature(current_actions)
         if signature and signature == previous_signature:
+            # 日本語: 同一アクション連続を検知してループ暴走を防止 / English: Detect repeated action batches to prevent infinite loops
             if all_read_only and not previous_round_had_write:
                 stale_read_repeat_count += 1
                 if stale_read_repeat_count >= max_same_read_action_streak:
@@ -539,6 +550,7 @@ def _run_scheduler_multi_step(
             if action_type in READ_ONLY_ACTION_TYPES:
                 actions_to_execute.append(action)
                 continue
+            # 日本語: 同一の更新系アクション再実行を抑止 / English: Prevent duplicate execution of mutating actions
             fingerprint = _action_fingerprint(action)
             if fingerprint and fingerprint in executed_write_fingerprints:
                 skipped_write_duplicates.append(action)
@@ -552,6 +564,7 @@ def _run_scheduler_multi_step(
             duplicate_warning = "同一の更新アクションが再提案されたため再実行をスキップしました。"
 
         if not actions_to_execute:
+            # 日本語: 実行可能アクションがない場合もトレースとフィードバックを残す / English: Record trace/feedback even when no executable actions remain
             no_progress_rounds += 1
             trace_actions = []
             for action in current_actions:
@@ -612,6 +625,7 @@ def _run_scheduler_multi_step(
                 completed_steps += 1
 
         new_resolved_items = _extract_resolved_memory_from_actions(actions_to_execute, today)
+        # 日本語: 同一計算結果は重複追加しない / English: Avoid duplicate resolved-memory entries
         existing_keys = {
             (item.get("expression", ""), item.get("date", ""), item.get("time", ""))
             for item in resolved_memory
@@ -704,6 +718,7 @@ def process_chat_request(
         str,
     ] = _attach_execution_trace_to_stored_content,
 ) -> Dict[str, Any]:
+    # 日本語: API入力を正規化し、実行・履歴保存まで一括処理 / English: Normalize API input and run end-to-end execution with history persistence
     formatted_messages = []
     user_message = ""
 
@@ -718,6 +733,7 @@ def process_chat_request(
             user_message = "(Context only)"
 
     if save_history:
+        # 日本語: ユーザー発話を先に保存（失敗しても処理継続） / English: Persist user message first (continue even if persistence fails)
         try:
             db.add(ChatHistory(role="user", content=user_message))
             db.commit()
@@ -735,6 +751,7 @@ def process_chat_request(
     )
 
     if save_history:
+        # 日本語: assistant 応答へ execution trace を埋め込んで保存 / English: Save assistant reply with embedded execution trace
         try:
             stored_assistant_content = attach_execution_trace_fn(
                 final_reply,

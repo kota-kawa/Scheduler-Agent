@@ -11,23 +11,28 @@ from fastapi.templating import Jinja2Templates
 
 from scheduler_agent.core.config import BASE_DIR
 
+# 日本語: Jinja テンプレートローダー / English: Jinja template loader
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 def flash(request: Request, message: str) -> None:
+    # 日本語: セッションにフラッシュメッセージを追記 / English: Append flash message into session storage
     flashes = request.session.setdefault("_flashes", [])
     flashes.append(message)
     request.session["_flashes"] = flashes
 
 
 def pop_flashed_messages(request: Request) -> List[str]:
+    # 日本語: 1回表示したメッセージを取り出して削除 / English: Pop one-time flash messages
     return request.session.pop("_flashes", [])
 
 
 def template_response(request: Request, template_name: str, context: Dict[str, Any]) -> HTMLResponse:
+    # 日本語: 呼び出し側コンテキストをコピーして request を保証 / English: Copy caller context and ensure request is present
     payload = dict(context)
     payload.setdefault("request", request)
 
+    # 日本語: 逆プロキシの prefix ヘッダを解決 / English: Resolve forwarded proxy prefix if present
     forwarded_prefix = (request.headers.get("x-forwarded-prefix") or "").strip()
     if "," in forwarded_prefix:
         forwarded_prefix = forwarded_prefix.split(",", 1)[0].strip()
@@ -39,6 +44,7 @@ def template_response(request: Request, template_name: str, context: Dict[str, A
     payload.setdefault("proxy_prefix", proxy_prefix)
 
     def _apply_proxy_prefix(path: str) -> str:
+        # 日本語: 二重付与を避けつつ prefix を適用 / English: Apply prefix while avoiding duplicate prefixing
         if not proxy_prefix:
             return path
         if path.startswith(proxy_prefix):
@@ -46,6 +52,7 @@ def template_response(request: Request, template_name: str, context: Dict[str, A
         return f"{proxy_prefix}{path}"
 
     def _url_for(endpoint: str, **values: Any) -> str:
+        # 日本語: path parameter と query parameter を分離して安全にURL生成 / English: Build URL by splitting path/query params safely
         param_names: set[str] = set()
         for route in request.app.router.routes:
             if getattr(route, "name", None) == endpoint:

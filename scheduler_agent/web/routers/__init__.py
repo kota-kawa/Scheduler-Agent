@@ -1,5 +1,6 @@
 """Router exports."""
 
+# 日本語: 各機能ルーターを集約して application.py から一括 import 可能にする / English: Re-export feature routers for centralized app wiring
 from .calendar_router import router as calendar_router
 from .chat_router import router as chat_router
 from .day_router import router as day_router

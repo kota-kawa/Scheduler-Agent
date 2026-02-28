@@ -9,9 +9,11 @@ from scheduler_agent.core.db import get_db
 from scheduler_agent.services.timeline_service import _get_timeline_data
 from scheduler_agent.web import handlers as web_handlers
 
+# 日本語: 日次詳細API群 / English: Day-detail API router
 router = APIRouter()
 
 
 @router.get("/api/day/{date_str}", name="api_day_view")
 def api_day_view(date_str: str, db: Session = Depends(get_db)):
+    # 日本語: 指定日のタイムライン取得 / English: Return timeline for the specified date
     return web_handlers.api_day_view(date_str, db, get_timeline_data_fn=_get_timeline_data)

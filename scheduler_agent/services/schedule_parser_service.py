@@ -10,6 +10,7 @@ from dateutil import parser as date_parser
 
 
 def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
+    # 日本語: 文字列/日付を date に寄せ、失敗時は default を返す / English: Coerce value into date, fallback to default on parse failure
     if isinstance(value, datetime.date):
         return value
     if isinstance(value, str) and value.strip():
@@ -24,6 +25,7 @@ def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
 
 
 def _safe_build_date(year: int, month: int, day: int) -> datetime.date | None:
+    # 日本語: 不正日付を例外化せず None で扱う / English: Build date safely and return None for invalid calendar values
     try:
         return datetime.date(year, month, day)
     except ValueError:
@@ -31,6 +33,7 @@ def _safe_build_date(year: int, month: int, day: int) -> datetime.date | None:
 
 
 def _normalize_hhmm(value: Any, fallback: str = "00:00") -> str:
+    # 日本語: 多様な時刻表記を HH:MM へ正規化 / English: Normalize multiple time formats into HH:MM
     if not isinstance(value, str):
         return fallback
     text = value.strip()
@@ -58,6 +61,7 @@ def _normalize_hhmm(value: Any, fallback: str = "00:00") -> str:
 
 
 def _extract_explicit_time(text: str) -> str | None:
+    # 日本語: 文中の明示時刻を抽出 / English: Extract explicit time expression from free text
     if not isinstance(text, str) or not text.strip():
         return None
 
@@ -103,6 +107,7 @@ def _extract_explicit_time(text: str) -> str | None:
 
 
 def _extract_relative_time_delta(text: str) -> datetime.timedelta | None:
+    # 日本語: 「2時間後」「30分前」などを timedelta 化 / English: Convert relative time phrases into timedelta
     if not isinstance(text, str) or not text.strip():
         return None
 
@@ -128,6 +133,7 @@ def _extract_relative_time_delta(text: str) -> datetime.timedelta | None:
 
 
 def _extract_weekday(text: str) -> int | None:
+    # 日本語: 日本語/英語の曜日表現を 0(月)-6(日) に変換 / English: Parse weekday tokens into 0(Mon)-6(Sun)
     if not isinstance(text, str) or not text.strip():
         return None
 
@@ -160,6 +166,7 @@ def _extract_weekday(text: str) -> int | None:
 
 
 def _extract_relative_week_shift(text: str) -> int | None:
+    # 日本語: 「来週/再来週/先週」などを週オフセットへ変換 / English: Convert relative week words into week offsets
     if not isinstance(text, str) or not text.strip():
         return None
 
@@ -175,12 +182,14 @@ def _extract_relative_week_shift(text: str) -> int | None:
 
 
 def _week_bounds(anchor_date: datetime.date) -> tuple[datetime.date, datetime.date]:
+    # 日本語: 任意日を含む週の月曜〜日曜を返す / English: Return Monday-Sunday range containing anchor date
     start = anchor_date - datetime.timedelta(days=anchor_date.weekday())
     end = start + datetime.timedelta(days=6)
     return start, end
 
 
 def _resolve_week_period(expression: str, base_date: datetime.date) -> tuple[datetime.date, datetime.date] | None:
+    # 日本語: 週全体指定（来週の予定など）を期間へ展開 / English: Resolve week-scope expressions into date ranges
     if not isinstance(expression, str) or not expression.strip():
         return None
 
@@ -197,6 +206,7 @@ def _resolve_week_period(expression: str, base_date: datetime.date) -> tuple[dat
 
 
 def _resolve_date_expression(expression: str, base_date: datetime.date) -> tuple[datetime.date | None, str]:
+    # 日本語: 自然言語の日付表現を絶対日付へ解決 / English: Resolve natural-language date expression into absolute date
     if not isinstance(expression, str) or not expression.strip():
         return None, "empty"
 
@@ -302,6 +312,7 @@ def _resolve_schedule_expression(
     base_time: str = "00:00",
     default_time: str = "00:00",
 ) -> Dict[str, Any]:
+    # 日本語: 日付+時刻を統合し、必要なら週範囲も返す / English: Resolve date/time expression and include week range when applicable
     text = str(expression).strip() if expression is not None else ""
     if not text:
         return {"ok": False, "error": "expression が空です。"}
@@ -317,6 +328,7 @@ def _resolve_schedule_expression(
 
     relative_time_delta = _extract_relative_time_delta(text)
     if relative_time_delta is not None:
+        # 日本語: 相対時刻がある場合は base_datetime から直接加減算 / English: Apply direct offset when relative time phrase is present
         resolved_datetime = base_datetime + relative_time_delta
         return {
             "ok": True,
@@ -353,6 +365,7 @@ def _resolve_schedule_expression(
 
     week_period = _resolve_week_period(text, base_date)
     if week_period is not None:
+        # 日本語: 「来週」等の期間指定を period_* へ格納 / English: Attach period_* fields for week-scope expressions
         period_start, period_end = week_period
         response["period_start"] = period_start.isoformat()
         response["period_end"] = period_end.isoformat()
@@ -361,6 +374,7 @@ def _resolve_schedule_expression(
 
 
 def _is_relative_datetime_text(value: Any) -> bool:
+    # 日本語: 相対日時表現を含むかの軽量判定 / English: Lightweight detection of relative date/time phrasing
     if not isinstance(value, str):
         return False
     text = value.strip()
@@ -406,6 +420,7 @@ def _is_relative_datetime_text(value: Any) -> bool:
 
 
 def _bool_from_value(value: Any, default: bool = False) -> bool:
+    # 日本語: bool/数値/文字列を真偽値へ正規化 / English: Normalize bool-like values from bool/number/string
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -420,6 +435,7 @@ def _bool_from_value(value: Any, default: bool = False) -> bool:
 
 
 def _try_parse_iso_date(value: Any) -> datetime.date | None:
+    # 日本語: YYYY-MM-DD のみ厳密に受理 / English: Parse strict YYYY-MM-DD date only
     if isinstance(value, datetime.date):
         return value
     if not isinstance(value, str):
@@ -437,6 +453,7 @@ _WEEKDAY_NAMES_JA = ["月曜日", "火曜日", "水曜日", "木曜日", "金曜
 
 
 def _calc_date_offset(base_date: datetime.date, offset_days: int) -> Dict[str, Any]:
+    # 日本語: 基準日±N日の計算ツール / English: Calc tool for base date plus/minus N days
     """base_date から offset_days 日後（負なら前）の日付を返す。"""
     result = base_date + datetime.timedelta(days=offset_days)
     return {
@@ -447,6 +464,7 @@ def _calc_date_offset(base_date: datetime.date, offset_days: int) -> Dict[str, A
 
 
 def _calc_month_boundary(year: int, month: int, boundary: str) -> Dict[str, Any]:
+    # 日本語: 月初/月末を返す計算ツール / English: Calc tool for month start/end boundary
     """指定月の月初(start)または月末(end)を返す。"""
     if month < 1 or month > 12:
         return {"ok": False, "error": f"month は 1〜12 で指定してください: {month}"}
@@ -469,6 +487,7 @@ def _calc_month_boundary(year: int, month: int, boundary: str) -> Dict[str, Any]
 def _calc_nearest_weekday(
     base_date: datetime.date, weekday: int, direction: str,
 ) -> Dict[str, Any]:
+    # 日本語: 直近の指定曜日を前後方向で探索 / English: Find nearest weekday in forward/backward direction
     """base_date から最も近い指定曜日を forward/backward で探す。当日が該当なら当日を返す。"""
     if weekday < 0 or weekday > 6:
         return {"ok": False, "error": f"weekday は 0(月)〜6(日) で指定してください: {weekday}"}
@@ -488,6 +507,7 @@ def _calc_nearest_weekday(
 def _calc_week_weekday(
     base_date: datetime.date, week_offset: int, weekday: int,
 ) -> Dict[str, Any]:
+    # 日本語: N週オフセット先の曜日を算出 / English: Compute weekday within week shifted by N
     """base_date の週から week_offset 週後(負なら前)の指定曜日を返す。"""
     if weekday < 0 or weekday > 6:
         return {"ok": False, "error": f"weekday は 0(月)〜6(日) で指定してください: {weekday}"}
@@ -498,6 +518,7 @@ def _calc_week_weekday(
 
 
 def _calc_week_range(base_date: datetime.date) -> Dict[str, Any]:
+    # 日本語: 週の始端/終端を返す計算ツール / English: Calc tool returning week start/end
     """base_date が含まれる週の月曜〜日曜の範囲を返す。"""
     monday = base_date - datetime.timedelta(days=base_date.weekday())
     sunday = monday + datetime.timedelta(days=6)
@@ -513,6 +534,7 @@ def _calc_week_range(base_date: datetime.date) -> Dict[str, Any]:
 def _calc_time_offset(
     base_date: datetime.date, base_time: str, offset_minutes: int,
 ) -> Dict[str, Any]:
+    # 日本語: 分単位オフセットで日時を前後 / English: Shift datetime by minute offset
     """base_date + base_time から offset_minutes 分加減算する。日跨ぎも対応。"""
     normalized = _normalize_hhmm(base_time, "")
     if not normalized:
@@ -529,6 +551,7 @@ def _calc_time_offset(
 
 
 def _get_date_info(target_date: datetime.date) -> Dict[str, Any]:
+    # 日本語: 検算用に日付属性を返却 / English: Return date metadata for validation/checks
     """日付の曜日等の情報を返す。"""
     return {
         "ok": True,
@@ -541,6 +564,7 @@ def _get_date_info(target_date: datetime.date) -> Dict[str, Any]:
 
 
 def _requires_date_resolution(value: Any) -> bool:
+    # 日本語: 相対表現など未解決日付を検出 / English: Detect unresolved/non-ISO date expressions
     """YYYY-MM-DD 形式でなければ日付解決が必要と判定する。"""
     if not isinstance(value, str) or not value.strip():
         return False

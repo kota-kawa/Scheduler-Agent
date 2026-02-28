@@ -24,6 +24,7 @@ from scheduler_agent.models import (
 )
 
 
+# 日本語: セッション内フラッシュメッセージをAPI形式で返す / English: Return session flash messages as API payload
 def api_flash(
     request: Request,
     *,
@@ -32,6 +33,7 @@ def api_flash(
     return {"messages": pop_flashed_messages_fn(request)}
 
 
+# 日本語: 月間カレンダー表示用の集計データを生成 / English: Build monthly calendar aggregate data for UI
 def api_calendar(
     request: Request,
     db: Session,
@@ -56,6 +58,7 @@ def api_calendar(
     for week in month_days:
         week_data = []
         for day in week:
+            # 日本語: 各日についてルーチン・タスク・日報のサマリーを算出 / English: Aggregate routines, tasks, and day-log summary per date
             is_current_month = day.month == month
 
             weekday = day.weekday()
@@ -95,14 +98,17 @@ def api_calendar(
     }
 
 
+# 日本語: SPA のトップページを返す / English: Render SPA index page
 def index(request: Request, *, template_response_fn):
     return template_response_fn(request, "spa.html", {"page_id": "index"})
 
 
+# 日本語: エージェント結果ページを返す / English: Render agent-result page
 def agent_result(request: Request, *, template_response_fn):
     return template_response_fn(request, "spa.html", {"page_id": "agent-result"})
 
 
+# 日本語: /agent-result/day の表示とPOST更新を処理 / English: Handle view/update flow for /agent-result/day
 async def agent_day_view(
     request: Request,
     date_str: str,
@@ -120,6 +126,7 @@ async def agent_day_view(
     if request.method == "POST":
         form = await request.form()
 
+        # 日本語: カスタムタスク追加フォーム / English: Custom task creation form branch
         if "add_custom_task" in form:
             name = form.get("custom_name")
             time_value = form.get("custom_time")
@@ -132,6 +139,7 @@ async def agent_day_view(
                 url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: 1日メモ(日報)保存フォーム / English: Day-log save form branch
         if "save_log" in form:
             content = form.get("day_log_content")
             day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
@@ -145,6 +153,7 @@ async def agent_day_view(
                 url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: カスタムタスク削除フォーム / English: Custom task delete form branch
         if "delete_custom_task" in form:
             task_id = form.get("delete_custom_task")
             task = db.get(CustomTask, int(task_id)) if task_id else None
@@ -156,6 +165,7 @@ async def agent_day_view(
                 url=str(request.url_for("agent_day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: ルーチンステップとカスタムタスクのチェック状態を一括保存 / English: Persist completion/memo states for routine steps and custom tasks
         routines = get_weekday_routines_fn(db, date_obj.weekday())
         all_steps = []
         for routine in routines:
@@ -195,10 +205,12 @@ async def agent_day_view(
     return template_response_fn(request, "spa.html", {"page_id": "agent-day"})
 
 
+# 日本語: 埋め込み用カレンダーページ / English: Embedded calendar page
 def embed_calendar(request: Request, *, template_response_fn):
     return template_response_fn(request, "spa.html", {"page_id": "embed-calendar"})
 
 
+# 日本語: 指定日のタイムラインAPI / English: Timeline API for a specific day
 def api_day_view(
     date_str: str,
     db: Session,
@@ -215,6 +227,7 @@ def api_day_view(
 
     serialized_timeline_items = []
     for item in timeline_items:
+        # 日本語: ORMオブジェクト/辞書どちらでも同一形式に正規化 / English: Normalize both ORM objects and dict-like items into one schema
         step = item["step"]
         if isinstance(step, dict):
             step_name = step.get("name", "")
@@ -266,6 +279,7 @@ def api_day_view(
     }
 
 
+# 日本語: /day の表示とPOST更新を処理 / English: Handle view/update flow for /day endpoint
 async def day_view(
     request: Request,
     date_str: str,
@@ -283,6 +297,7 @@ async def day_view(
     if request.method == "POST":
         form = await request.form()
 
+        # 日本語: カスタムタスク追加フォーム / English: Custom task creation form branch
         if "add_custom_task" in form:
             name = form.get("custom_name")
             time_value = form.get("custom_time")
@@ -295,6 +310,7 @@ async def day_view(
                 url=str(request.url_for("day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: 日報保存フォーム / English: Day-log save form branch
         if "save_log" in form:
             content = form.get("day_log_content")
             day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
@@ -308,6 +324,7 @@ async def day_view(
                 url=str(request.url_for("day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: カスタムタスク削除フォーム / English: Custom task delete form branch
         if "delete_custom_task" in form:
             task_id = form.get("delete_custom_task")
             task = db.get(CustomTask, int(task_id)) if task_id else None
@@ -319,6 +336,7 @@ async def day_view(
                 url=str(request.url_for("day_view", date_str=date_str)), status_code=303
             )
 
+        # 日本語: 画面全体の進捗入力を日次ログへ反映 / English: Persist full-page progress inputs into daily logs
         routines = get_weekday_routines_fn(db, date_obj.weekday())
         all_steps = []
         for routine in routines:
@@ -358,6 +376,7 @@ async def day_view(
     return template_response_fn(request, "spa.html", {"page_id": "day"})
 
 
+# 日本語: 曜日指定のルーチン一覧API / English: Routine list API filtered by weekday
 def api_routines_by_day(weekday: int, db: Session, *, get_weekday_routines_fn):
     routines = get_weekday_routines_fn(db, weekday)
     serialized_routines = []
@@ -373,6 +392,7 @@ def api_routines_by_day(weekday: int, db: Session, *, get_weekday_routines_fn):
     return {"routines": serialized_routines}
 
 
+# 日本語: 全ルーチン一覧API / English: API for listing all routines
 def api_routines(db: Session):
     routines = db.exec(select(Routine)).all()
     serialized_routines = []
@@ -392,10 +412,12 @@ def api_routines(db: Session):
     return {"routines": serialized_routines}
 
 
+# 日本語: ルーチン管理画面 / English: Routine management page
 def routines_list(request: Request, *, template_response_fn):
     return template_response_fn(request, "spa.html", {"page_id": "routines"})
 
 
+# 日本語: ルーチン作成POST / English: Create routine from form POST
 async def add_routine(request: Request, db: Session):
     form = await request.form()
     name = form.get("name")
@@ -408,6 +430,7 @@ async def add_routine(request: Request, db: Session):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ルーチン削除POST / English: Delete routine from form POST
 def delete_routine(request: Request, id: int, db: Session):
     routine = db.get(Routine, id)
     if not routine:
@@ -417,6 +440,7 @@ def delete_routine(request: Request, id: int, db: Session):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ルーチンへのステップ追加POST / English: Add step to routine via form POST
 async def add_step(request: Request, id: int, db: Session):
     form = await request.form()
     routine = db.get(Routine, id)
@@ -432,6 +456,7 @@ async def add_step(request: Request, id: int, db: Session):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: ステップ削除POST / English: Delete step via form POST
 def delete_step(request: Request, id: int, db: Session):
     step = db.get(Step, id)
     if not step:
@@ -441,6 +466,7 @@ def delete_step(request: Request, id: int, db: Session):
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
 
 
+# 日本語: 利用可能モデルと現在選択を返す / English: Return available models and current selection
 def list_models(*, apply_model_selection_fn=apply_model_selection, current_available_models_fn=current_available_models):
     provider, model, base_url, _ = apply_model_selection_fn("scheduler")
     return {
@@ -449,6 +475,7 @@ def list_models(*, apply_model_selection_fn=apply_model_selection, current_avail
     }
 
 
+# 日本語: モデル選択の上書き設定を更新 / English: Update in-memory model override selection
 async def update_model_settings(request: Request, *, update_override_fn=update_override):
     try:
         payload = await request.json()
@@ -467,6 +494,7 @@ async def update_model_settings(request: Request, *, update_override_fn=update_o
     return {"status": "ok", "applied": {"provider": provider, "model": model, "base_url": base_url}}
 
 
+# 日本語: チャット履歴の取得・削除API / English: GET/DELETE handler for chat history
 async def manage_chat_history(
     request: Request,
     db: Session,
@@ -475,6 +503,7 @@ async def manage_chat_history(
     delete_fn=sa_delete,
 ):
     if request.method == "DELETE":
+        # 日本語: 全履歴クリア / English: Clear all chat history rows
         try:
             db.exec(delete_fn(ChatHistory))
             db.commit()
@@ -486,6 +515,7 @@ async def manage_chat_history(
     history = db.exec(select(ChatHistory).order_by(ChatHistory.timestamp)).all()
     serialized_history = []
     for item in history:
+        # 日本語: 保存時に埋め込んだ execution trace を展開 / English: Extract embedded execution trace from stored content
         clean_content, execution_trace = extract_execution_trace_fn(item.content)
         serialized_history.append(
             {
@@ -498,6 +528,7 @@ async def manage_chat_history(
     return {"history": serialized_history}
 
 
+# 日本語: チャットAPI本体 / English: Main chat API handler
 async def chat(request: Request, db: Session, *, process_chat_request_fn):
     try:
         payload = await request.json()
@@ -509,6 +540,7 @@ async def chat(request: Request, db: Session, *, process_chat_request_fn):
 
     formatted_messages = []
     for msg in messages:
+        # 日本語: role/content が妥当なメッセージのみ通す / English: Keep only messages with valid role/content
         if not isinstance(msg, dict):
             continue
         role = msg.get("role")
@@ -522,13 +554,16 @@ async def chat(request: Request, db: Session, *, process_chat_request_fn):
 
     recent_messages = formatted_messages[-10:]
 
+    # 日本語: 最新10件のみで推論負荷を制御 / English: Limit context to recent 10 messages
     return process_chat_request_fn(db, recent_messages)
 
 
+# 日本語: 評価画面 / English: Evaluation page
 def evaluation_page(request: Request, *, template_response_fn):
     return template_response_fn(request, "spa.html", {"page_id": "evaluation"})
 
 
+# 日本語: 評価チャットAPI（履歴保存なし） / English: Evaluation chat endpoint (no persistent history)
 async def evaluation_chat(
     request: Request,
     db: Session,
@@ -582,6 +617,7 @@ async def evaluation_chat(
     }
 
 
+# 日本語: 評価用データを初期化 / English: Reset scheduler data for evaluation runs
 def evaluation_reset(db: Session, *, delete_fn=sa_delete):
     try:
         db.exec(delete_fn(DailyLog))
@@ -596,6 +632,7 @@ def evaluation_reset(db: Session, *, delete_fn=sa_delete):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# 日本語: 単日シード投入 / English: Seed evaluation data for a single date
 async def evaluation_seed(request: Request, db: Session, *, seed_evaluation_data_fn):
     try:
         payload = await request.json()
@@ -611,6 +648,7 @@ async def evaluation_seed(request: Request, db: Session, *, seed_evaluation_data
     return {"status": "ok", "message": "; ".join(messages)}
 
 
+# 日本語: 期間シード投入 / English: Seed evaluation data for a date range
 async def evaluation_seed_period(request: Request, db: Session, *, seed_evaluation_data_fn):
     try:
         payload = await request.json()
@@ -632,6 +670,7 @@ async def evaluation_seed_period(request: Request, db: Session, *, seed_evaluati
     return {"status": "ok", "message": "; ".join(messages)}
 
 
+# 日本語: サンプルデータ投入API / English: Seed sample data endpoint
 def add_sample_data(db: Session, *, seed_sample_data_fn):
     try:
         messages = seed_sample_data_fn(db)
@@ -646,6 +685,7 @@ def add_sample_data(db: Session, *, seed_sample_data_fn):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# 日本語: 評価ログ保存API / English: Persist evaluation result record
 async def evaluation_log(request: Request, db: Session):
     try:
         data = await request.json()
@@ -668,6 +708,7 @@ async def evaluation_log(request: Request, db: Session):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# 日本語: 評価履歴一覧API / English: List evaluation result history
 def evaluation_history(db: Session):
     results = db.exec(
         select(EvaluationResult).order_by(EvaluationResult.timestamp.desc())

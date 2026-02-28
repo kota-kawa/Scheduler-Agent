@@ -6,6 +6,7 @@ from scheduler_agent.core.config import BASE_DIR
 
 
 def _build_alembic_config(database_url: str):
+    # 日本語: 実行時DB URLを注入した Alembic 設定を構築 / English: Build Alembic config with runtime DB URL
     try:
         from alembic.config import Config
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency error path
@@ -19,6 +20,7 @@ def _build_alembic_config(database_url: str):
 
 def upgrade_to_head(database_url: str) -> None:
     """Apply migrations to the latest revision."""
+    # 日本語: 起動前に最新マイグレーションへ追従 / English: Upgrade schema to latest revision before handling requests
     try:
         from alembic import command
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency error path

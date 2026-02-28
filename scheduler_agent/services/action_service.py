@@ -26,6 +26,7 @@ from scheduler_agent.services.schedule_parser_service import (
 )
 from scheduler_agent.services.timeline_service import get_weekday_routines
 
+# 日本語: 計算専用で DB を変更しないアクション群 / English: Calculation-only action types that do not mutate DB
 _CALC_ACTION_TYPES = {
     "calc_date_offset",
     "calc_month_boundary",
@@ -36,6 +37,7 @@ _CALC_ACTION_TYPES = {
     "get_date_info",
 }
 
+# 日本語: 参照系（副作用なし）アクション群 / English: Read-only action types with no persistent mutation
 READ_ONLY_ACTION_TYPES = _CALC_ACTION_TYPES | {
     "get_day_log",
     "list_tasks_in_period",
@@ -43,7 +45,7 @@ READ_ONLY_ACTION_TYPES = _CALC_ACTION_TYPES | {
 }
 
 
-
+# 日本語: 「全件削除」判定に使う語彙セット / English: Tokens interpreted as delete-all routine intent
 _DELETE_ALL_ROUTINE_TOKENS = {
     "all",
     "allroutine",
@@ -64,6 +66,7 @@ _ROUTINE_NAME_SUFFIXES = ("ルーチン", "ルーティン", "routine", "routine
 
 
 def _normalize_routine_name_key(value: Any) -> str:
+    # 日本語: ルーチン名比較のため空白/引用符を除去して正規化 / English: Normalize routine-name key for tolerant matching
     if not isinstance(value, str):
         return ""
     text = value.strip().strip("「」『』\"'`")
@@ -72,6 +75,7 @@ def _normalize_routine_name_key(value: Any) -> str:
 
 
 def _routine_name_candidates(value: Any) -> List[str]:
+    # 日本語: 「◯◯ルーチン」等の接尾辞違いを候補化 / English: Build candidate names by stripping common suffix variants
     base = _normalize_routine_name_key(value)
     if not base:
         return []
@@ -86,6 +90,7 @@ def _routine_name_candidates(value: Any) -> List[str]:
 
 
 def _is_delete_all_routine_request(action: Dict[str, Any], routine_name: Any) -> bool:
+    # 日本語: all/scope/name いずれでも全削除指示を検出 / English: Detect delete-all intent from all/scope/name fields
     if _bool_from_value(action.get("all"), False):
         return True
     scope_key = _normalize_routine_name_key(action.get("scope"))
@@ -96,6 +101,7 @@ def _is_delete_all_routine_request(action: Dict[str, Any], routine_name: Any) ->
 
 
 def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple[List[Routine], str]:
+    # 日本語: 完全一致優先、次に部分一致で候補検索 / English: Match routine names by exact first, then partial fallback
     candidates = _routine_name_candidates(routine_name)
     if not candidates:
         return [], "none"
@@ -105,6 +111,7 @@ def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple
         for routine in routines
     ]
 
+    # 日本語: 重複名を考慮して ID 単位で一意化 / English: Deduplicate matches by routine ID
     exact_by_id: Dict[int, Routine] = {}
     for candidate in candidates:
         for routine, name_key in normalized_pairs:
@@ -125,11 +132,8 @@ def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple
 
     return [], "none"
 
-
-
-
-
 def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
+    # 日本語: LLM からの action 配列を順次検証・実行 / English: Validate and execute LLM-produced actions sequentially
     results = []
     errors = []
     modified_ids = []
@@ -145,6 +149,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
             action_type = action.get("type")
 
             # ---------- 原子的計算ツール ----------
+            # English: Atomic calc tools (no DB write)
             if action_type == "calc_date_offset":
                 base_date_str = action.get("base_date")
                 base_date_val = _try_parse_iso_date(base_date_str)
@@ -248,6 +253,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "create_custom_task":
+                # 日本語: 単発カスタムタスク作成 / English: Create single custom task
                 name = action.get("name")
                 if not isinstance(name, str) or not name.strip():
                     errors.append("create_custom_task: name が指定されていません。")
@@ -282,6 +288,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "create_tasks_in_range":
+                # 日本語: 期間内に同一タスクを日次で一括作成 / English: Bulk-create same task for each date in range
                 name = action.get("name")
                 if not isinstance(name, str) or not name.strip():
                     errors.append("create_tasks_in_range: name が指定されていません。")
@@ -327,6 +334,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "delete_custom_task":
+                # 日本語: ID指定でカスタムタスク削除 / English: Delete custom task by ID
                 task_id = action.get("task_id")
                 try:
                     task_id_int = int(task_id)
@@ -343,6 +351,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "delete_tasks_in_range":
+                # 日本語: 期間内カスタムタスクを一括削除 / English: Delete all custom tasks within date range
                 raw_start = action.get("start_date")
                 raw_end = action.get("end_date")
                 if _requires_date_resolution(raw_start) or _requires_date_resolution(raw_end):
@@ -379,6 +388,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "toggle_step":
+                # 日本語: ルーチンステップの完了/メモ更新 / English: Update completion/memo for routine step
                 step_id = action.get("step_id")
                 try:
                     step_id_int = int(step_id)
@@ -417,6 +427,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "toggle_custom_task":
+                # 日本語: カスタムタスクの完了/メモ更新 / English: Update completion/memo for custom task
                 task_id = action.get("task_id")
                 try:
                     task_id_int = int(task_id)
@@ -439,6 +450,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_custom_task_time":
+                # 日本語: カスタムタスク時刻変更 / English: Update custom task time
                 task_id = action.get("task_id")
                 new_time = action.get("new_time")
                 if not new_time:
@@ -460,6 +472,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "rename_custom_task":
+                # 日本語: カスタムタスク名変更 / English: Rename custom task
                 task_id = action.get("task_id")
                 new_name = action.get("new_name")
                 if not new_name:
@@ -482,6 +495,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_custom_task_memo":
+                # 日本語: カスタムタスクメモ更新 / English: Update custom task memo
                 task_id = action.get("task_id")
                 new_memo = action.get("new_memo")
                 if new_memo is None:
@@ -503,6 +517,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_log":
+                # 日本語: 日報を上書き保存 / English: Overwrite day log content
                 content = action.get("content")
                 if not isinstance(content, str) or not content.strip():
                     errors.append("update_log: content が指定されていません。")
@@ -526,6 +541,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "append_day_log":
+                # 日本語: 既存日報へ追記 / English: Append text to existing day log
                 content = action.get("content")
                 if not isinstance(content, str) or not content.strip():
                     errors.append("append_day_log: content が指定されていません。")
@@ -556,6 +572,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "get_day_log":
+                # 日本語: 日報参照（読み取り専用） / English: Fetch day log (read-only)
                 raw_date_value = action.get("date")
                 if _requires_date_resolution(raw_date_value):
                     errors.append(
@@ -572,6 +589,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "add_routine":
+                # 日本語: ルーチン追加 / English: Create routine
                 name = action.get("name")
                 if not name:
                     errors.append("add_routine: name is required")
@@ -586,11 +604,13 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "delete_routine":
+                # 日本語: ID/名称/全件指定に対応したルーチン削除 / English: Delete routine by ID, name, or delete-all intent
                 rid = action.get("routine_id")
                 routine_name = action.get("routine_name")
                 delete_all = _is_delete_all_routine_request(action, routine_name)
 
                 if rid is not None and str(rid).strip() != "":
+                    # 日本語: routine_id があれば最優先で削除 / English: Prioritize explicit routine_id when provided
                     try:
                         routine_id_int = int(rid)
                     except (TypeError, ValueError):
@@ -608,6 +628,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 routines = db.exec(select(Routine)).all()
 
                 if delete_all:
+                    # 日本語: 全件削除モード / English: Delete-all mode
                     if not routines:
                         results.append("削除対象のルーチンはありませんでした。")
                         continue
@@ -633,6 +654,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     continue
 
                 if match_mode != "exact" and len(matched_routines) > 1:
+                    # 日本語: 部分一致が複数ある場合は誤削除防止で停止 / English: Stop on ambiguous partial matches to avoid accidental deletions
                     candidates = "、".join(
                         f"{item.name}(ID:{item.id})" for item in matched_routines[:5]
                     )
@@ -655,6 +677,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_routine_days":
+                # 日本語: ルーチンの有効曜日更新 / English: Update routine active weekdays
                 routine_id = action.get("routine_id")
                 new_days = action.get("new_days")
                 if not new_days:
@@ -675,6 +698,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "add_step":
+                # 日本語: ルーチンへステップ追加 / English: Add new step to routine
                 rid = action.get("routine_id")
                 name = action.get("name")
                 if not rid or not name:
@@ -694,6 +718,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "delete_step":
+                # 日本語: ステップ削除 / English: Delete step by ID
                 sid = action.get("step_id")
                 step = db.get(Step, int(sid)) if sid else None
                 if step:
@@ -705,6 +730,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_step_time":
+                # 日本語: ステップ時刻更新 / English: Update step time
                 step_id = action.get("step_id")
                 new_time = action.get("new_time")
                 if not new_time:
@@ -726,6 +752,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "rename_step":
+                # 日本語: ステップ名変更 / English: Rename step
                 step_id = action.get("step_id")
                 new_name = action.get("new_name")
                 if not new_name:
@@ -748,6 +775,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "update_step_memo":
+                # 日本語: ステップメモ更新 / English: Update step memo
                 step_id = action.get("step_id")
                 new_memo = action.get("new_memo")
                 if new_memo is None:
@@ -769,6 +797,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "list_tasks_in_period":
+                # 日本語: 期間内のカスタムタスク+ルーチンを横断取得 / English: List both custom tasks and routine steps in date range
                 raw_start_date = action.get("start_date")
                 raw_end_date = action.get("end_date")
                 if _requires_date_resolution(raw_start_date) or _requires_date_resolution(raw_end_date):
@@ -798,6 +827,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
                 current_date = start_date
                 while current_date <= end_date:
+                    # 日本語: 日ごとに該当曜日ルーチンを展開 / English: Expand weekday routines date-by-date
                     routines_for_day = get_weekday_routines(db, current_date.weekday())
                     for routine in routines_for_day:
                         for step in routine.steps:
@@ -825,6 +855,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 continue
 
             if action_type == "get_daily_summary":
+                # 日本語: 指定日の活動要約を組み立て / English: Build daily activity summary
                 raw_date_value = action.get("date")
                 if _requires_date_resolution(raw_date_value):
                     errors.append(
@@ -878,8 +909,10 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
             errors.append(f"未知のアクション: {action_type}")
         if dirty:
+            # 日本語: 変更があった場合のみコミット / English: Commit only when at least one mutating action succeeded
             db.commit()
     except Exception as exc:  # noqa: BLE001
+        # 日本語: 途中失敗時は全ロールバックしてエラー返却 / English: Roll back whole batch on unexpected failure
         db.rollback()
         errors.append(f"操作の適用に失敗しました: {exc}")
         results = []

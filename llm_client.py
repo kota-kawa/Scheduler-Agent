@@ -26,9 +26,9 @@ def _bool_env(name: str, default: bool) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-# Prompt guard is always enabled by design.
+# 日本語: Prompt Guard は設計上常時有効 / English: Prompt guard is always enabled by design.
 PROMPT_GUARD_ENABLED = True
-# Fail-open on guard errors: allow normal response if guard check fails.
+# 日本語: Guard失敗時は fail-open で通常応答を許可 / English: Fail-open on guard errors: allow normal response if guard check fails.
 PROMPT_GUARD_FAIL_OPEN = True
 PROMPT_GUARD_MODEL = os.getenv("PROMPT_GUARD_MODEL", "openai/gpt-oss-safeguard-20b")
 PROMPT_GUARD_BASE_URL = os.getenv("PROMPT_GUARD_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
@@ -382,14 +382,14 @@ class UnifiedClient:
         if self.provider == "claude":
             return self._create_anthropic(**kwargs)
 
-        # OpenAI-compatible handling
-        # Pre-emptive fix for o1 models which don't support temperature
+        # 日本語: OpenAI互換プロバイダ向け処理 / English: OpenAI-compatible handling
+        # 日本語: temperature 非対応モデル(o1系)を事前補正 / English: Pre-emptive fix for o1 models which don't support temperature
         model_name = kwargs.get("model", self.model_name)
         if str(model_name).lower().startswith("o1-"):
             kwargs.pop("temperature", None)
 
-        # Iterative retry logic for parameter incompatibilities
-        # We allow up to 3 attempts to automatically fix common issues (e.g. temp, max_tokens)
+        # 日本語: パラメータ不整合を自動修正しつつ再試行 / English: Iterative retry logic for parameter incompatibilities
+        # 日本語: 代表的エラー(temperature/max_tokens)を最大3回まで補正 / English: Up to 3 retries for common issues (e.g. temp, max_tokens)
         last_exception = None
         for _ in range(3):
             try:
@@ -399,15 +399,15 @@ class UnifiedClient:
                 err_str = str(e).lower()
                 fixed = False
 
-                # Handle "Unsupported value: 'temperature'..." or similar
-                # o1 models often strictly enforce temperature=1 or no temperature param
+                # 日本語: temperature 非対応エラーを吸収 / English: Handle "Unsupported value: 'temperature'..." or similar
+                # 日本語: o1系は temperature 指定禁止の場合がある / English: o1 models often require no temperature parameter
                 if "temperature" in err_str and ("unsupported" in err_str or "invalid" in err_str or "not supported" in err_str):
                     if "temperature" in kwargs:
                         kwargs.pop("temperature")
                         fixed = True
 
-                # Handle "Unsupported parameter: 'max_tokens'" or similar
-                # o1 models and newer OpenAI versions require max_completion_tokens
+                # 日本語: max_tokens 非対応を max_completion_tokens へ変換 / English: Handle max_tokens incompatibility via max_completion_tokens
+                # 日本語: 新しいAPI仕様との差異を吸収 / English: Align with newer OpenAI-style parameter expectations
                 if "max_tokens" in err_str and ("unsupported" in err_str or "parameter" in err_str or "unknown" in err_str):
                     if "max_tokens" in kwargs:
                         kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
@@ -489,7 +489,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     current_time_jp = now.strftime("%Y年%m月%d日 (%A) %H時%M分%S秒")
     current_time_iso = now.isoformat(timespec="seconds")
 
-    # Build weekday calendar for this week and next 3 weeks (28 days total)
+    # 日本語: 今週+3週間分の曜日付きカレンダーを生成 / English: Build weekday calendar for this week and next 3 weeks (28 days total)
     _weekday_names_ja = ["月", "火", "水", "木", "金", "土", "日"]
     _today = now.date()
     _current_weekday_ja = _weekday_names_ja[_today.weekday()]
@@ -506,7 +506,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     _week2_cal       = _build_week_cal(_this_monday + timedelta(weeks=2))
     _week3_cal       = _build_week_cal(_this_monday + timedelta(weeks=3))
 
-    # Sanitize inputs to prevent hallucination of tool formats
+    # 日本語: ツール呼び出し構文の誤検出を防ぐため入力を無害化 / English: Sanitize inputs to prevent hallucination of tool formats
     context = _sanitize_text(context)
     sanitized_messages = []
     for msg in messages:
@@ -646,9 +646,8 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         except Exception as e:
             last_exception = e
             err_str = str(e)
-            # Check for Anthropic tool_use_failed or similar
+            # 日本語: tool_use_failed 系エラー時はプロンプト強化して1回再試行 / English: Retry once with stricter prompt on tool_use_failed-like errors
             if attempt == 0 and ("tool_use_failed" in err_str or "failed_generation" in err_str or "400" in err_str):
-                # Retry with stricter prompt
                 continue
             raise e
 

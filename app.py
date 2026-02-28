@@ -7,7 +7,7 @@ business logic to the modular `scheduler_agent` package.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, Iterator, List, Union
+from typing import Any, Callable, Dict, Iterator, List, Union
 
 from fastapi import Depends, Request
 from sqlalchemy import delete
@@ -42,11 +42,13 @@ import scheduler_agent.services.timeline_service as timeline_service_module
 from scheduler_agent.web import handlers as web_handlers
 from scheduler_agent.web.templates import flash, pop_flashed_messages, template_response
 
+# 日本語: 環境変数変更後でも最新DB設定を反映する / English: Refresh DB engine to reflect late env overrides
 refresh_engine_from_env()
 
 
 # --- Service wrappers exposed for backward compatibility ---
 
+# 日本語: 旧 `app` API 互換のため parser_service へ委譲 / English: Delegate to parser_service for legacy `app` API compatibility
 def _parse_date(value: Any, default_date: datetime.date) -> datetime.date:
     return parser_service._parse_date(value, default_date)
 
@@ -57,10 +59,12 @@ def _resolve_schedule_expression(
     base_time: str = "00:00",
     default_time: str = "00:00",
 ) -> Dict[str, Any]:
+    # 日本語: 日時解釈の本処理はサービス層を利用 / English: Use service-layer implementation for schedule resolution
     return parser_service._resolve_schedule_expression(expression, base_date, base_time, default_time)
 
 
 def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
+    # 日本語: 曜日別ルーチン取得を timeline_service に委譲 / English: Delegate weekday routine lookup to timeline_service
     return timeline_service_module.get_weekday_routines(db, weekday_int)
 
 
@@ -69,10 +73,12 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
 
 
 def _build_scheduler_context(db: Session, today: datetime.date | None = None) -> str:
+    # 日本語: LLM向けコンテキスト生成をサービス層で実行 / English: Build LLM context via service layer
     return timeline_service_module._build_scheduler_context(db, today)
 
 
 def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
+    # 日本語: ツールアクション適用の責務を action_service へ集約 / English: Centralize tool-action execution in action_service
     return action_service_module._apply_actions(db, actions, default_date)
 
 
@@ -93,6 +99,7 @@ def _build_final_reply(
     results: List[str],
     errors: List[str],
 ) -> str:
+    # 日本語: 最終返信整形は reply_service のロジックを再利用 / English: Reuse reply_service logic for final response formatting
     return reply_service_module._build_final_reply(
         user_message,
         reply_text,
@@ -109,6 +116,7 @@ def _run_scheduler_multi_step(
     today: datetime.date,
     max_rounds: int | None = None,
 ) -> Dict[str, Any]:
+    # 日本語: マルチラウンド実行エンジンを chat_service へ委譲 / English: Delegate multi-round orchestration to chat_service
     return chat_service_module._run_scheduler_multi_step(
         db,
         formatted_messages,
@@ -123,6 +131,7 @@ def _run_scheduler_multi_step(
 def process_chat_request(
     db: Session, message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True
 ) -> Dict[str, Any]:
+    # 日本語: 互換APIとしてチャット処理を公開 / English: Expose chat processing through compatibility facade
     return chat_service_module.process_chat_request(
         db,
         message_or_history,
@@ -135,6 +144,45 @@ def process_chat_request(
 
 # --- Route logic wrappers (used by routers and direct tests) ---
 
+# 日本語: テンプレート応答が必要なページ系ハンドラを共通化 / English: Common helper for template-based page handlers
+def _template_page(
+    handler: Callable[..., Any],
+    request: Request,
+):
+    return handler(request, template_response_fn=template_response)
+
+
+# 日本語: 日付ページ系ハンドラの依存注入を共通化 / English: Common dependency injection for date-page handlers
+async def _date_page(
+    handler: Callable[..., Any],
+    request: Request,
+    date_str: str,
+    db: Session,
+):
+    return await handler(
+        request,
+        date_str,
+        db,
+        get_weekday_routines_fn=get_weekday_routines,
+        flash_fn=flash,
+        template_response_fn=template_response,
+    )
+
+
+# 日本語: 評価用シードAPIの呼び出しを共通化 / English: Common helper for evaluation seed endpoints
+async def _evaluation_seed_endpoint(
+    handler: Callable[..., Any],
+    request: Request,
+    db: Session,
+):
+    return await handler(
+        request,
+        db,
+        seed_evaluation_data_fn=_seed_evaluation_data,
+    )
+
+
+# 日本語: 以下は Web ハンドラへの薄いパススルー層 / English: The wrappers below are thin pass-throughs to web handlers
 def api_flash(request: Request):
     return web_handlers.api_flash(request, pop_flashed_messages_fn=pop_flashed_messages)
 
@@ -144,26 +192,19 @@ def api_calendar(request: Request, db: Session = Depends(get_db)):
 
 
 def index(request: Request, db: Session = Depends(get_db)):
-    return web_handlers.index(request, template_response_fn=template_response)
+    return _template_page(web_handlers.index, request)
 
 
 def agent_result(request: Request, db: Session = Depends(get_db)):
-    return web_handlers.agent_result(request, template_response_fn=template_response)
+    return _template_page(web_handlers.agent_result, request)
 
 
 async def agent_day_view(request: Request, date_str: str, db: Session = Depends(get_db)):
-    return await web_handlers.agent_day_view(
-        request,
-        date_str,
-        db,
-        get_weekday_routines_fn=get_weekday_routines,
-        flash_fn=flash,
-        template_response_fn=template_response,
-    )
+    return await _date_page(web_handlers.agent_day_view, request, date_str, db)
 
 
 def embed_calendar(request: Request, db: Session = Depends(get_db)):
-    return web_handlers.embed_calendar(request, template_response_fn=template_response)
+    return _template_page(web_handlers.embed_calendar, request)
 
 
 def api_day_view(date_str: str, db: Session = Depends(get_db)):
@@ -171,14 +212,7 @@ def api_day_view(date_str: str, db: Session = Depends(get_db)):
 
 
 async def day_view(request: Request, date_str: str, db: Session = Depends(get_db)):
-    return await web_handlers.day_view(
-        request,
-        date_str,
-        db,
-        get_weekday_routines_fn=get_weekday_routines,
-        flash_fn=flash,
-        template_response_fn=template_response,
-    )
+    return await _date_page(web_handlers.day_view, request, date_str, db)
 
 
 def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
@@ -190,7 +224,7 @@ def api_routines(db: Session = Depends(get_db)):
 
 
 def routines_list(request: Request, db: Session = Depends(get_db)):
-    return web_handlers.routines_list(request, template_response_fn=template_response)
+    return _template_page(web_handlers.routines_list, request)
 
 
 async def add_routine(request: Request, db: Session = Depends(get_db)):
@@ -224,6 +258,7 @@ async def update_model_settings(request: Request):
 
 
 async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
+    # 日本語: 履歴取得/削除時に execution trace の抽出器を注入 / English: Inject execution-trace extractor for history endpoints
     return await web_handlers.manage_chat_history(
         request,
         db,
@@ -233,11 +268,12 @@ async def manage_chat_history(request: Request, db: Session = Depends(get_db)):
 
 
 async def chat(request: Request, db: Session = Depends(get_db)):
+    # 日本語: チャットAPIは process_chat_request ラッパー経由で実行 / English: Route chat API through process_chat_request wrapper
     return await web_handlers.chat(request, db, process_chat_request_fn=process_chat_request)
 
 
 def evaluation_page(request: Request):
-    return web_handlers.evaluation_page(request, template_response_fn=template_response)
+    return _template_page(web_handlers.evaluation_page, request)
 
 
 async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
@@ -250,27 +286,21 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
 
 
 def evaluation_reset(db: Session = Depends(get_db)):
+    # 日本語: 評価データ初期化時に SQLAlchemy delete を注入 / English: Inject SQLAlchemy delete for evaluation reset
     return web_handlers.evaluation_reset(db, delete_fn=delete)
 
 
+def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
+    # 日本語: 互換エクスポート用のシード関数 / English: Compatibility export for evaluation seed helper
+    return eval_seed_service._seed_evaluation_data(db, start_date, end_date)
+
+
 async def evaluation_seed(request: Request, db: Session = Depends(get_db)):
-    return await web_handlers.evaluation_seed(
-        request,
-        db,
-        seed_evaluation_data_fn=_seed_evaluation_data,
-    )
+    return await _evaluation_seed_endpoint(web_handlers.evaluation_seed, request, db)
 
 
 async def evaluation_seed_period(request: Request, db: Session = Depends(get_db)):
-    return await web_handlers.evaluation_seed_period(
-        request,
-        db,
-        seed_evaluation_data_fn=_seed_evaluation_data,
-    )
-
-
-def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
-    return eval_seed_service._seed_evaluation_data(db, start_date, end_date)
+    return await _evaluation_seed_endpoint(web_handlers.evaluation_seed_period, request, db)
 
 
 def add_sample_data(db: Session = Depends(get_db)):
@@ -285,8 +315,7 @@ def evaluation_history(db: Session = Depends(get_db)):
     return web_handlers.evaluation_history(db)
 
 
-__all__ = [
-    "app",
+_MODEL_EXPORTS = [
     "Session",
     "Iterator",
     "Routine",
@@ -296,11 +325,17 @@ __all__ = [
     "DayLog",
     "ChatHistory",
     "EvaluationResult",
+]
+
+_DB_EXPORTS = [
     "create_session",
     "get_db",
     "engine",
     "_ensure_db_initialized",
     "_init_db",
+]
+
+_SERVICE_EXPORTS = [
     "get_weekday_routines",
     "_resolve_schedule_expression",
     "_build_scheduler_context",
@@ -311,6 +346,10 @@ __all__ = [
     "_extract_execution_trace_from_stored_content",
     "_build_final_reply",
     "process_chat_request",
+    "_seed_evaluation_data",
+]
+
+_ROUTE_EXPORTS = [
     "api_flash",
     "api_calendar",
     "index",
@@ -335,8 +374,15 @@ __all__ = [
     "evaluation_reset",
     "evaluation_seed",
     "evaluation_seed_period",
-    "_seed_evaluation_data",
     "add_sample_data",
     "evaluation_log",
     "evaluation_history",
+]
+
+__all__ = [
+    "app",
+    *_MODEL_EXPORTS,
+    *_DB_EXPORTS,
+    *_SERVICE_EXPORTS,
+    *_ROUTE_EXPORTS,
 ]

@@ -10,9 +10,11 @@ from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine, Step
 
 
 def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
+    # 日本語: 指定期間の評価用データを毎日再生成 / English: Rebuild deterministic evaluation fixtures for each date in range
     messages = []
 
     routine_name = "Daily Routine"
+    # 日本語: 評価用の基準ルーチンを1つ用意 / English: Ensure one baseline routine for evaluation scenarios
     daily_routine = db.exec(select(Routine).where(Routine.name == routine_name)).first()
     if not daily_routine:
         daily_routine = Routine(
@@ -36,6 +38,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
 
     current_date = start_date
     while current_date <= end_date:
+        # 日本語: 対象日の既存データを初期化してから投入 / English: Clear existing rows before seeding target date data
         db.exec(delete(DailyLog).where(DailyLog.date == current_date))
         db.exec(delete(CustomTask).where(CustomTask.date == current_date))
         db.exec(delete(DayLog).where(DayLog.date == current_date))
@@ -64,6 +67,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
         messages.append(f"Seeded Custom Tasks for {current_date.isoformat()}")
 
         if daily_routine:
+            # 日本語: 一部ステップのみ完了済みデータを作り、評価の差分を作る / English: Mark subset of steps done to create realistic mixed completion state
             all_steps = db.exec(
                 select(Step).where(Step.routine_id == daily_routine.id)
             ).all()
@@ -92,6 +96,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
 
 
 def seed_sample_data(db: Session):
+    # 日本語: 手動確認用の軽量サンプルデータ投入 / English: Seed lightweight sample data for manual verification
     today = datetime.date.today()
     messages = []
 
@@ -128,6 +133,7 @@ def seed_sample_data(db: Session):
         messages.append(f"Seeded Routine '{routine_name}'")
 
     task_name = "Buy Milk"
+    # 日本語: 同名同日データがあれば重複作成しない / English: Skip insert when same-day task already exists
     if not db.exec(
         select(CustomTask).where(CustomTask.date == today, CustomTask.name == task_name)
     ).first():

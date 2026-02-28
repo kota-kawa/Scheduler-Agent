@@ -13,6 +13,7 @@ from scheduler_agent.core.config import EXEC_TRACE_MARKER_PREFIX, EXEC_TRACE_MAR
 
 
 def _remove_no_schedule_lines(text: str) -> str:
+    # 日本語: 「予定なし」系の定型行を除外して読みやすく整形 / English: Remove "no schedule" boilerplate lines for cleaner output
     if not isinstance(text, str):
         return str(text)
 
@@ -31,6 +32,7 @@ def _attach_execution_trace_to_stored_content(
     content: str,
     execution_trace: List[Dict[str, Any]] | None,
 ) -> str:
+    # 日本語: execution trace を Base64 で本文末尾へ埋め込み / English: Embed execution trace at tail as Base64 marker payload
     base_content = content if isinstance(content, str) else str(content)
     trace_items = [item for item in (execution_trace or []) if isinstance(item, dict)]
     if not trace_items:
@@ -46,6 +48,7 @@ def _attach_execution_trace_to_stored_content(
 
 
 def _extract_execution_trace_from_stored_content(content: Any) -> tuple[str, List[Dict[str, Any]]]:
+    # 日本語: 保存本文から埋め込み trace を取り出し本文と分離 / English: Extract embedded trace and return clean visible content
     text = content if isinstance(content, str) else str(content or "")
     pattern = re.compile(
         rf"\n?{re.escape(EXEC_TRACE_MARKER_PREFIX)}([A-Za-z0-9+/=]+){re.escape(EXEC_TRACE_MARKER_SUFFIX)}\s*$"
@@ -70,6 +73,7 @@ def _extract_execution_trace_from_stored_content(content: Any) -> tuple[str, Lis
 
 
 def _is_internal_system_error(error_text: str) -> bool:
+    # 日本語: ユーザー表示不要な内部制御エラーを判定 / English: Identify internal-control errors that should be hidden from users
     if not isinstance(error_text, str):
         return False
     text = error_text.strip()
@@ -87,6 +91,7 @@ def _is_internal_system_error(error_text: str) -> bool:
 
 
 def _looks_mechanical_reply(text: str) -> bool:
+    # 日本語: LLM要約が機械的/内部形式寄りかを検知 / English: Detect mechanical/internal-style summary replies
     if not isinstance(text, str):
         return False
     markers = ["【実行結果】", "計算結果:", "expression=", "source=", "datetime="]
@@ -94,6 +99,7 @@ def _looks_mechanical_reply(text: str) -> bool:
 
 
 def _friendly_result_line(result: str) -> List[str]:
+    # 日本語: 生の実行結果文字列をユーザ向け表現へ変換 / English: Convert raw execution result lines into user-friendly phrasing
     if not isinstance(result, str) or not result.strip():
         return []
 
@@ -151,6 +157,7 @@ def _build_pop_friendly_reply(
     results: List[str],
     errors: List[str],
 ) -> str:
+    # 日本語: フォールバック時に使う親しみやすい結果サマリ / English: Build friendly fallback summary when LLM summarization is unavailable
     lines: List[str] = []
     lines.append("✨ 実行しました！")
 
@@ -181,6 +188,7 @@ def _build_final_reply(
     summary_client_factory: Callable[[], Any] = UnifiedClient,
     content_to_text_fn: Callable[[Any], str] = _content_to_text,
 ) -> str:
+    # 日本語: 実行結果/エラーを踏まえ最終返信文を生成 / English: Produce final assistant reply from execution results and errors
     if not results and not errors:
         final_reply = reply_text if reply_text else "了解しました。"
         return _remove_no_schedule_lines(final_reply)
@@ -216,6 +224,7 @@ def _build_final_reply(
     ]
 
     try:
+        # 日本語: 要約専用の軽い追論理LLM呼び出し / English: Run dedicated summary LLM call for polished final wording
         resp = summary_client.create(
             model=summary_client.model_name,
             messages=summary_messages,
@@ -224,6 +233,7 @@ def _build_final_reply(
         )
         final_reply = content_to_text_fn(resp.choices[0].message.content)
         if _looks_mechanical_reply(final_reply):
+            # 日本語: 内部表現が漏れた場合はテンプレート整形にフォールバック / English: Fallback to templated friendly reply if internal syntax leaks
             final_reply = _build_pop_friendly_reply(user_message, results, errors)
     except Exception as exc:
         final_reply = _build_pop_friendly_reply(user_message, results, errors)
