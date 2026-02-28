@@ -51,6 +51,14 @@ flowchart LR
   llm --> groq[Groq]
 ```
 
+## 🧠 Design Decisions
+
+- **Why FastAPI (instead of Flask):** async-ready request handling, automatic OpenAPI docs, and type-safe contracts with Pydantic/SQLModel help keep API evolution fast and predictable.
+- **Why PostgreSQL + SQLAlchemy/SQLModel:** scheduling data has relational constraints (routines, steps, logs), so ACID guarantees and explicit schema migrations (Alembic) reduce data integrity risk.
+- **Why signed-cookie sessions (not Redis yet):** current session usage is lightweight (flash/UI state), so Starlette `SessionMiddleware` minimizes infrastructure and operational overhead for single-instance deployments.
+- **Why a multi-provider LLM routing layer:** provider abstraction in `model_selection.py`/`llm_client.py` avoids vendor lock-in and supports cost/latency optimization plus fallback options.
+- **Why React SPA + Vite with Jinja compatibility:** this enables fast, component-driven UI iteration while preserving simple server-rendered entry points where needed.
+
 ---
 
 ## 🚀 Quick start (Docker Compose only)
@@ -200,6 +208,14 @@ flowchart LR
   llm --> gemini[Google Gemini]
   llm --> groq[Groq]
 ```
+
+## 🧠 技術的な意思決定（Design Decisions）
+
+- **FastAPI を選んだ理由（Flask ではなく）:** 非同期処理に素直に対応でき、OpenAPI ドキュメントを自動生成できるため、型安全な API 契約を保ちながら機能追加を速く進められるためです。
+- **PostgreSQL + SQLAlchemy/SQLModel を選んだ理由:** ルーティン・ステップ・ログのように関係性を持つデータを扱うため、ACID 特性と Alembic による明示的なマイグレーション運用で整合性リスクを抑えやすいからです。
+- **Redis ではなく署名付き Cookie セッションを使う理由（現時点）:** セッション用途がフラッシュメッセージなど軽量な UI 状態中心のため、`SessionMiddleware` でインフラ構成を増やさず運用コストを低く保てるからです。
+- **マルチ LLM ルーティング層を置く理由:** `model_selection.py` / `llm_client.py` でプロバイダ依存を分離し、ベンダーロックイン回避・コスト/レイテンシ最適化・フォールバック戦略を取りやすくするためです。
+- **React SPA + Vite と Jinja 互換構成を併用する理由:** コンポーネント単位で UI を高速に改善しつつ、必要な箇所ではシンプルなサーバーサイド入口を維持できるためです。
 
 ---
 
