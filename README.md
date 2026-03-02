@@ -31,6 +31,10 @@ Click a thumbnail to open the video on YouTube.
 | --- | --- | --- |
 | Schedule lunch for next Wednesday and Friday | Check next week's schedule, then create a gym routine for next Wednesday | Reschedule the gym routine to Saturday |
 
+## Overview
+
+Scheduler Agent is an AI-powered scheduling assistant that helps manage recurring routines, one-off tasks, and daily logs through a conversational chat interface backed by multiple LLM providers. Use the chat to add and modify tasks, toggle completion, and query your schedule; the UI lets you view and edit routines and logs.
+
 ## Welcome
 
 **Scheduler Agent** is an AI-powered scheduling assistant that helps you manage routines and one-off tasks through a simple chat experience. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized.
@@ -189,6 +193,10 @@ This project is released under the [MIT License](LICENSE.md).
 | [![デモ動画 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![デモ動画 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![デモ動画 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
 | --- | --- | --- |
 | 来週の水曜日と金曜日にランチの予定を入れる | 来週の予定を確認した後、来週水曜日にジムに行くルーティンを作成する | ジムに行くルーティンを土曜日に変更する |
+
+## 概要
+
+Scheduler Agent は、会話型チャットインターフェースを通じてルーティンや単発タスク、日次ログを管理するためのAIアシスタントです。チャットでタスクを追加・編集したり、完了を切り替えたり、予定を確認でき、UIでルーティンやログを閲覧・編集できます。
 
 **Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
 「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
