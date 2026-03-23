@@ -61,6 +61,7 @@ flowchart LR
 - **Why PostgreSQL + SQLAlchemy/SQLModel:** scheduling data has relational constraints (routines, steps, logs), so ACID guarantees and explicit schema migrations (Alembic) reduce data integrity risk.
 - **Why signed-cookie sessions (not Redis yet):** current session usage is lightweight (flash/UI state), so Starlette `SessionMiddleware` minimizes infrastructure and operational overhead for single-instance deployments.
 - **Why a multi-provider LLM routing layer:** provider abstraction in `model_selection.py`/`llm_client.py` avoids vendor lock-in and supports cost/latency optimization plus fallback options.
+- **Why we added a dedicated calculation tool:** LLM-only reasoning is error-prone for date/weekday arithmetic, so deterministic tool execution handles those computations to reduce hallucination risk and improve production reliability. This design shows practical reliability engineering beyond prompt tuning.
 - **Why React SPA + Vite with Jinja compatibility:** this enables fast, component-driven UI iteration while preserving simple server-rendered entry points where needed.
 
 ---
@@ -223,6 +224,7 @@ flowchart LR
 - **PostgreSQL + SQLAlchemy/SQLModel を選んだ理由:** ルーティン・ステップ・ログのように関係性を持つデータを扱うため、ACID 特性と Alembic による明示的なマイグレーション運用で整合性リスクを抑えやすいからです。
 - **Redis ではなく署名付き Cookie セッションを使う理由（現時点）:** セッション用途がフラッシュメッセージなど軽量な UI 状態中心のため、`SessionMiddleware` でインフラ構成を増やさず運用コストを低く保てるからです。
 - **マルチ LLM ルーティング層を置く理由:** `model_selection.py` / `llm_client.py` でプロバイダ依存を分離し、ベンダーロックイン回避・コスト/レイテンシ最適化・フォールバック戦略を取りやすくするためです。
+- **計算ツールを用意した理由:** 曜日・日付計算は LLM 単体推論だと誤りが出やすいため、決定的なツール実行に切り出して計算ミスとハルシネーションのリスクを下げ、運用の安定性を高めるためです。これはプロンプト調整だけに頼らない実践的な信頼性設計です。
 - **React SPA + Vite と Jinja 互換構成を併用する理由:** コンポーネント単位で UI を高速に改善しつつ、必要な箇所ではシンプルなサーバーサイド入口を維持できるためです。
 
 ---
