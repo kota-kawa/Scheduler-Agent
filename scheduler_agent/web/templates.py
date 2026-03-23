@@ -80,4 +80,5 @@ def template_response(request: Request, template_name: str, context: Dict[str, A
 
     payload.setdefault("url_for", _url_for)
     payload.setdefault("get_flashed_messages", lambda: pop_flashed_messages(request))
-    return templates.TemplateResponse(template_name, payload)
+    # 日本語: Starlette新仕様に合わせて request-first で呼び出す / English: Use request-first TemplateResponse API
+    return templates.TemplateResponse(request=request, name=template_name, context=payload)

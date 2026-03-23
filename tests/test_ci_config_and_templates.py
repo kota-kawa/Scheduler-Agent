@@ -75,3 +75,27 @@ def test_template_response_applies_proxy_prefix():
     assert response.context["url_for"]("index") == "/proxy/"
     assert 'meta name="proxy-prefix" content="/proxy"' in body
     assert "/proxy/static/spa/app.css" in body
+
+
+def test_template_response_uses_request_first_signature(monkeypatch):
+    request = _build_request()
+    captured = {}
+
+    class _DummyResponse:
+        def __init__(self, context):
+            self.context = context
+
+    def _fake_template_response(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _DummyResponse(kwargs["context"])
+
+    monkeypatch.setattr(web_templates.templates, "TemplateResponse", _fake_template_response)
+
+    response = web_templates.template_response(request, "spa.html", {"page_id": "index"})
+
+    assert captured["args"] == ()
+    assert captured["kwargs"]["request"] is request
+    assert captured["kwargs"]["name"] == "spa.html"
+    assert captured["kwargs"]["context"]["request"] is request
+    assert response.context["proxy_prefix"] == "/proxy"
