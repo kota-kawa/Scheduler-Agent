@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, List, Union
 
@@ -29,6 +30,8 @@ from scheduler_agent.services.schedule_parser_service import (
     _week_bounds,
 )
 from scheduler_agent.services.timeline_service import _build_scheduler_context
+
+logger = logging.getLogger("scheduler_agent.chat_orchestration")
 
 
 # Actions that accept date parameters and depend on correct date resolution.
@@ -442,6 +445,7 @@ def _run_scheduler_multi_step(
     formatted_messages: List[Dict[str, str]],
     today: datetime.date,
     max_rounds: int | None = None,
+    guest_id: str = "default",
     *,
     call_scheduler_llm_fn: Callable[[List[Dict[str, str]], str], tuple[str, List[Dict[str, Any]]]] = call_scheduler_llm,
     build_scheduler_context_fn: Callable[[Session, datetime.date | None], str] = _build_scheduler_context,
@@ -483,12 +487,13 @@ def _run_scheduler_multi_step(
 
     for round_index in range(1, rounds_limit + 1):
         # 日本語: 各ラウンドで最新DB状態からコンテキストを再構築 / English: Rebuild scheduler context from latest DB state each round
-        context = build_scheduler_context_fn(db, today)
+        context = build_scheduler_context_fn(db, today, guest_id=guest_id)
 
         try:
             reply_text, actions = call_scheduler_llm_fn(working_messages, context)
         except Exception as exc:
-            all_errors.append(f"LLM 呼び出しに失敗しました: {exc}")
+            logger.exception("LLM invocation failed during scheduler orchestration.", exc_info=exc)
+            all_errors.append("LLM 呼び出しに失敗しました。")
             break
 
         reply_text = reply_text or ""
@@ -609,7 +614,7 @@ def _run_scheduler_multi_step(
                 break
             continue
 
-        results, errors, modified_ids = apply_actions_fn(db, actions_to_execute, today)
+        results, errors, modified_ids = apply_actions_fn(db, actions_to_execute, today, guest_id=guest_id)
         all_actions.extend(actions_to_execute)
         all_results.extend(results)
         all_errors.extend(errors)
@@ -707,6 +712,7 @@ def process_chat_request(
     db: Session,
     message_or_history: Union[str, List[Dict[str, str]]],
     save_history: bool = True,
+    guest_id: str = "default",
     *,
     run_scheduler_multi_step_fn: Callable[
         [Session, List[Dict[str, str]], datetime.date],
@@ -735,14 +741,14 @@ def process_chat_request(
     if save_history:
         # 日本語: ユーザー発話を先に保存（失敗しても処理継続） / English: Persist user message first (continue even if persistence fails)
         try:
-            db.add(ChatHistory(role="user", content=user_message))
+            db.add(ChatHistory(guest_id=guest_id, role="user", content=user_message))
             db.commit()
         except Exception as exc:
             db.rollback()
-            print(f"Failed to save user message: {exc}")
+            logger.exception("Failed to save user chat history.", exc_info=exc)
 
     today = datetime.date.today()
-    execution = run_scheduler_multi_step_fn(db, formatted_messages, today)
+    execution = run_scheduler_multi_step_fn(db, formatted_messages, today, guest_id=guest_id)
     final_reply = build_final_reply_fn(
         user_message=user_message,
         reply_text=execution.get("reply_text", ""),
@@ -757,11 +763,11 @@ def process_chat_request(
                 final_reply,
                 execution.get("execution_trace", []),
             )
-            db.add(ChatHistory(role="assistant", content=stored_assistant_content))
+            db.add(ChatHistory(guest_id=guest_id, role="assistant", content=stored_assistant_content))
             db.commit()
         except Exception as exc:
             db.rollback()
-            print(f"Failed to save assistant message: {exc}")
+            logger.exception("Failed to save assistant chat history.", exc_info=exc)
 
     results = execution.get("results", [])
     return {

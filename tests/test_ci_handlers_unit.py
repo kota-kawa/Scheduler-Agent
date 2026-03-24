@@ -44,6 +44,9 @@ class _FakeRequest:
         self._payload = payload if payload is not None else {}
         self.method = method
         self.query_params = query_params or {}
+        self.headers = {}
+        self.cookies = {}
+        self.state = SimpleNamespace(guest_context=SimpleNamespace(guest_id="test-guest-id"))
 
     async def json(self):
         return self._payload
@@ -183,8 +186,9 @@ def test_chat_rejects_when_last_user_message_exceeds_input_limit(monkeypatch):
 def test_chat_passes_only_recent_ten_messages():
     captured = {}
 
-    def _fake_process_chat_request(_db, recent_messages):
+    def _fake_process_chat_request(_db, recent_messages, guest_id="default"):
         captured["recent_messages"] = recent_messages
+        captured["guest_id"] = guest_id
         return {"reply": "ok", "should_refresh": False, "modified_ids": [], "execution_trace": []}
 
     payload = {"messages": [{"role": "user", "content": f"m{i}"} for i in range(11)]}
@@ -200,6 +204,21 @@ def test_chat_passes_only_recent_ten_messages():
     assert len(captured["recent_messages"]) == 10
     assert captured["recent_messages"][0]["content"] == "m1"
     assert captured["recent_messages"][-1]["content"] == "m10"
+    assert captured["guest_id"] == "test-guest-id"
+
+
+def test_evaluation_reset_deletes_scoped_evaluation_result():
+    db = _FakeDb()
+
+    result = web_handlers.evaluation_reset(
+        _FakeRequest(),
+        db,
+        delete_fn=lambda _model: "DELETE",
+    )
+
+    assert result["status"] == "ok"
+    assert db.commit_count == 1
+    assert len(db.exec_calls) == 6
 
 
 def test_update_model_settings_accepts_nested_scheduler_selection():
@@ -277,3 +296,12 @@ def test_evaluation_seed_period_validates_date_order():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "start_date cannot be after end_date"
+
+
+def test_evaluation_reset_rejects_when_dangerous_api_disabled(monkeypatch):
+    monkeypatch.setattr(web_handlers, "dangerous_evaluation_api_enabled", lambda: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        web_handlers.evaluation_reset(_FakeRequest(), _FakeDb(), delete_fn=lambda _model: "DELETE")
+
+    assert exc_info.value.status_code == 403

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta
@@ -21,6 +22,8 @@ from scheduler_agent.services.usage_limit_service import (
     MonthlyLlmRequestLimitExceeded,
     reserve_monthly_llm_request_or_raise,
 )
+
+logger = logging.getLogger("scheduler_agent.llm_client")
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -149,7 +152,7 @@ def run_prompt_guard(user_input: str) -> Dict[str, Any]:
     try:
         reserve_monthly_llm_request_or_raise()
     except MonthlyLlmRequestLimitExceeded as exc:
-        result["error"] = str(exc)
+        result["error"] = "今月のLLM API利用上限に達しました。"
         result["limit_exceeded"] = True
         return result
 
@@ -165,7 +168,8 @@ def run_prompt_guard(user_input: str) -> Dict[str, Any]:
             max_tokens=max_output_tokens,
         )
     except Exception as exc:
-        result["error"] = f"Prompt guard request failed: {exc}"
+        logger.exception("Prompt guard request failed.", exc_info=exc)
+        result["error"] = "Prompt guard request failed."
         return result
 
     raw_text = _content_to_text(getattr(response.choices[0].message, "content", ""))
@@ -494,13 +498,20 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
         return str(guard_result.get("error") or "今月のLLM API利用上限に達したため実行できません。"), []
     if guard_result.get("error"):
         if PROMPT_GUARD_FAIL_OPEN:
-            print(f"Prompt guard error (fail-open): {guard_result['error']}")
+            logger.warning(
+                "Prompt guard error (fail-open): %s",
+                guard_result.get("error"),
+            )
         else:
             return PROMPT_GUARD_ERROR_MESSAGE, []
     elif guard_result.get("blocked"):
         category = guard_result.get("category")
         rationale = guard_result.get("rationale")
-        print(f"Prompt guard blocked input. category={category} rationale={rationale}")
+        logger.info(
+            "Prompt guard blocked input. category=%s rationale=%s",
+            category,
+            rationale,
+        )
         return PROMPT_GUARD_BLOCKED_MESSAGE, []
 
     client = UnifiedClient()
@@ -663,8 +674,8 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
 
             return reply, actions
 
-        except MonthlyLlmRequestLimitExceeded as e:
-            return str(e), []
+        except MonthlyLlmRequestLimitExceeded:
+            return "今月のLLM API利用上限に達したため実行できません。", []
         except Exception as e:
             last_exception = e
             err_str = str(e)

@@ -12,9 +12,11 @@ class Routine(SQLModel, table=True):
 
     # 日本語: カンマ区切り曜日(0=月 ... 6=日) / English: Comma-separated weekdays (0=Mon ... 6=Sun)
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     name: str = Field(max_length=100)
     days: str = Field(default="0,1,2,3,4", max_length=50)
     description: str | None = Field(default=None, max_length=200)
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
     steps: list["Step"] = Relationship(
         back_populates="routine", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
@@ -25,11 +27,13 @@ class Step(SQLModel, table=True):
     __tablename__ = "step"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     routine_id: int = Field(foreign_key="routine.id")
     name: str = Field(max_length=100)
     time: str = Field(default="00:00", max_length=10)
     category: str = Field(default="Other", max_length=50)
     memo: str | None = Field(default=None, max_length=200)
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
 
     routine: Routine | None = Relationship(back_populates="steps")
 
@@ -39,10 +43,12 @@ class DailyLog(SQLModel, table=True):
     __tablename__ = "daily_log"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     date: datetime.date
     step_id: int = Field(foreign_key="step.id")
     done: bool = Field(default=False)
     memo: str | None = Field(default=None, max_length=200)
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
 
     step: Step | None = Relationship()
 
@@ -52,11 +58,13 @@ class CustomTask(SQLModel, table=True):
     __tablename__ = "custom_task"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     date: datetime.date
     name: str = Field(max_length=100)
     time: str = Field(default="00:00", max_length=10)
     done: bool = Field(default=False)
     memo: str | None = Field(default=None, max_length=200)
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
 
 
 # 日本語: 1日全体の自由記述メモ / English: Free-form day-level journal entry
@@ -64,5 +72,7 @@ class DayLog(SQLModel, table=True):
     __tablename__ = "day_log"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     date: datetime.date
     content: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)

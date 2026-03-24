@@ -5,7 +5,8 @@ from __future__ import annotations
 import calendar
 import datetime
 import json
-from typing import Callable, Dict, List
+import logging
+from typing import Any, Callable, Dict, List
 
 from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -13,7 +14,7 @@ from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 
 from model_selection import apply_model_selection, current_available_models, update_override
-from scheduler_agent.core.config import get_max_input_chars
+from scheduler_agent.core.config import dangerous_evaluation_api_enabled, get_max_input_chars
 from scheduler_agent.models import (
     ChatHistory,
     CustomTask,
@@ -23,6 +24,84 @@ from scheduler_agent.models import (
     Routine,
     Step,
 )
+from scheduler_agent.web.error_handling import raise_internal_server_error
+from scheduler_agent.web.request_context import get_guest_id_from_request
+
+logger = logging.getLogger("scheduler_agent.web.handlers")
+
+
+def _resolve_guest_id(request: Request | None) -> str:
+    if request is None:
+        return "default"
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "guest_context", None):
+        return get_guest_id_from_request(request)
+    test_guest_id = getattr(request, "guest_id", None)
+    if isinstance(test_guest_id, str) and test_guest_id.strip():
+        return test_guest_id.strip()
+    return get_guest_id_from_request(request)
+
+
+def _call_get_weekday_routines(get_weekday_routines_fn, db: Session, weekday: int, guest_id: str):
+    try:
+        return get_weekday_routines_fn(db, weekday, guest_id=guest_id)
+    except TypeError:
+        return get_weekday_routines_fn(db, weekday)
+
+
+def _call_get_timeline_data(get_timeline_data_fn, db: Session, date_obj: datetime.date, guest_id: str):
+    try:
+        return get_timeline_data_fn(db, date_obj, guest_id=guest_id)
+    except TypeError:
+        return get_timeline_data_fn(db, date_obj)
+
+
+def _call_process_chat_request(process_chat_request_fn, db: Session, messages: List[Dict[str, str]], guest_id: str):
+    try:
+        return process_chat_request_fn(db, messages, guest_id=guest_id)
+    except TypeError:
+        return process_chat_request_fn(db, messages)
+
+
+def _call_run_scheduler_multi_step(
+    run_scheduler_multi_step_fn,
+    db: Session,
+    messages: List[Dict[str, str]],
+    today: datetime.date,
+    guest_id: str,
+):
+    try:
+        return run_scheduler_multi_step_fn(db, messages, today, guest_id=guest_id)
+    except TypeError:
+        return run_scheduler_multi_step_fn(db, messages, today)
+
+
+def _call_seed_evaluation_data(seed_evaluation_data_fn, db: Session, start_date: datetime.date, end_date: datetime.date, guest_id: str):
+    try:
+        return seed_evaluation_data_fn(db, start_date, end_date, guest_id=guest_id)
+    except TypeError:
+        return seed_evaluation_data_fn(db, start_date, end_date)
+
+
+def _call_seed_sample_data(seed_sample_data_fn, db: Session, guest_id: str):
+    try:
+        return seed_sample_data_fn(db, guest_id=guest_id)
+    except TypeError:
+        return seed_sample_data_fn(db)
+
+
+def _require_dangerous_eval_api_enabled() -> None:
+    if dangerous_evaluation_api_enabled():
+        return
+    raise HTTPException(status_code=403, detail="This endpoint is disabled in production.")
+
+
+def _scoped_delete_statement(delete_fn, model: Any, guest_id: str):
+    statement = delete_fn(model)
+    where_fn = getattr(statement, "where", None)
+    if callable(where_fn):
+        return where_fn(getattr(model, "guest_id") == guest_id)
+    return statement
 
 
 # 日本語: セッション内フラッシュメッセージをAPI形式で返す / English: Return session flash messages as API payload
@@ -41,6 +120,7 @@ def api_calendar(
     *,
     get_weekday_routines_fn,
 ):
+    guest_id = _resolve_guest_id(request)
     today = datetime.date.today()
     year = int(request.query_params.get("year", today.year))
     month = int(request.query_params.get("month", today.month))
@@ -63,17 +143,21 @@ def api_calendar(
             is_current_month = day.month == month
 
             weekday = day.weekday()
-            routines = get_weekday_routines_fn(db, weekday)
+            routines = _call_get_weekday_routines(get_weekday_routines_fn, db, weekday, guest_id)
             total_steps = sum(len(r.steps) for r in routines)
 
-            logs = db.exec(select(DailyLog).where(DailyLog.date == day)).all()
+            logs = db.exec(
+                select(DailyLog).where(DailyLog.date == day, DailyLog.guest_id == guest_id)
+            ).all()
             completed_count = sum(1 for log in logs if log.done)
 
-            custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == day)).all()
+            custom_tasks = db.exec(
+                select(CustomTask).where(CustomTask.date == day, CustomTask.guest_id == guest_id)
+            ).all()
             total_steps += len(custom_tasks)
             completed_count += sum(1 for task in custom_tasks if task.done)
 
-            day_log = db.exec(select(DayLog).where(DayLog.date == day)).first()
+            day_log = db.exec(select(DayLog).where(DayLog.date == day, DayLog.guest_id == guest_id)).first()
             has_day_log = bool(day_log and day_log.content and day_log.content.strip())
 
             week_data.append(
@@ -119,6 +203,7 @@ async def agent_day_view(
     flash_fn,
     template_response_fn,
 ):
+    guest_id = _resolve_guest_id(request)
     try:
         date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -132,7 +217,7 @@ async def agent_day_view(
             name = form.get("custom_name")
             time_value = form.get("custom_time")
             if name:
-                task = CustomTask(date=date_obj, name=name, time=time_value)
+                task = CustomTask(guest_id=guest_id, date=date_obj, name=name, time=time_value)
                 db.add(task)
                 db.commit()
                 flash_fn(request, "カスタムタスクを追加しました。")
@@ -143,9 +228,11 @@ async def agent_day_view(
         # 日本語: 1日メモ(日報)保存フォーム / English: Day-log save form branch
         if "save_log" in form:
             content = form.get("day_log_content")
-            day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
+            day_log = db.exec(
+                select(DayLog).where(DayLog.date == date_obj, DayLog.guest_id == guest_id)
+            ).first()
             if not day_log:
-                day_log = DayLog(date=date_obj)
+                day_log = DayLog(guest_id=guest_id, date=date_obj)
                 db.add(day_log)
             day_log.content = content
             db.commit()
@@ -158,6 +245,8 @@ async def agent_day_view(
         if "delete_custom_task" in form:
             task_id = form.get("delete_custom_task")
             task = db.get(CustomTask, int(task_id)) if task_id else None
+            if task and task.guest_id != guest_id:
+                task = None
             if task:
                 db.delete(task)
                 db.commit()
@@ -167,7 +256,7 @@ async def agent_day_view(
             )
 
         # 日本語: ルーチンステップとカスタムタスクのチェック状態を一括保存 / English: Persist completion/memo states for routine steps and custom tasks
-        routines = get_weekday_routines_fn(db, date_obj.weekday())
+        routines = _call_get_weekday_routines(get_weekday_routines_fn, db, date_obj.weekday(), guest_id)
         all_steps = []
         for routine in routines:
             all_steps.extend(routine.steps)
@@ -179,16 +268,22 @@ async def agent_day_view(
             memo_text = form.get(memo_key, "")
 
             log = db.exec(
-                select(DailyLog).where(DailyLog.date == date_obj, DailyLog.step_id == step.id)
+                select(DailyLog).where(
+                    DailyLog.date == date_obj,
+                    DailyLog.step_id == step.id,
+                    DailyLog.guest_id == guest_id,
+                )
             ).first()
             if not log:
-                log = DailyLog(date=date_obj, step_id=step.id)
+                log = DailyLog(guest_id=guest_id, date=date_obj, step_id=step.id)
                 db.add(log)
 
             log.done = is_done
             log.memo = memo_text
 
-        custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
+        custom_tasks = db.exec(
+            select(CustomTask).where(CustomTask.date == date_obj, CustomTask.guest_id == guest_id)
+        ).all()
         for task in custom_tasks:
             done_key = f"custom_done_{task.id}"
             memo_key = f"custom_memo_{task.id}"
@@ -217,14 +312,16 @@ def api_day_view(
     db: Session,
     *,
     get_timeline_data_fn,
+    request: Request | None = None,
 ):
+    guest_id = _resolve_guest_id(request)
     try:
         date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
 
-    timeline_items, completion_rate = get_timeline_data_fn(db, date_obj)
-    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
+    timeline_items, completion_rate = _call_get_timeline_data(get_timeline_data_fn, db, date_obj, guest_id)
+    day_log = db.exec(select(DayLog).where(DayLog.date == date_obj, DayLog.guest_id == guest_id)).first()
 
     serialized_timeline_items = []
     for item in timeline_items:
@@ -290,6 +387,7 @@ async def day_view(
     flash_fn,
     template_response_fn,
 ):
+    guest_id = _resolve_guest_id(request)
     try:
         date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -303,7 +401,7 @@ async def day_view(
             name = form.get("custom_name")
             time_value = form.get("custom_time")
             if name:
-                task = CustomTask(date=date_obj, name=name, time=time_value)
+                task = CustomTask(guest_id=guest_id, date=date_obj, name=name, time=time_value)
                 db.add(task)
                 db.commit()
                 flash_fn(request, "カスタムタスクを追加しました。")
@@ -314,9 +412,11 @@ async def day_view(
         # 日本語: 日報保存フォーム / English: Day-log save form branch
         if "save_log" in form:
             content = form.get("day_log_content")
-            day_log = db.exec(select(DayLog).where(DayLog.date == date_obj)).first()
+            day_log = db.exec(
+                select(DayLog).where(DayLog.date == date_obj, DayLog.guest_id == guest_id)
+            ).first()
             if not day_log:
-                day_log = DayLog(date=date_obj)
+                day_log = DayLog(guest_id=guest_id, date=date_obj)
                 db.add(day_log)
             day_log.content = content
             db.commit()
@@ -329,6 +429,8 @@ async def day_view(
         if "delete_custom_task" in form:
             task_id = form.get("delete_custom_task")
             task = db.get(CustomTask, int(task_id)) if task_id else None
+            if task and task.guest_id != guest_id:
+                task = None
             if task:
                 db.delete(task)
                 db.commit()
@@ -338,7 +440,7 @@ async def day_view(
             )
 
         # 日本語: 画面全体の進捗入力を日次ログへ反映 / English: Persist full-page progress inputs into daily logs
-        routines = get_weekday_routines_fn(db, date_obj.weekday())
+        routines = _call_get_weekday_routines(get_weekday_routines_fn, db, date_obj.weekday(), guest_id)
         all_steps = []
         for routine in routines:
             all_steps.extend(routine.steps)
@@ -350,16 +452,22 @@ async def day_view(
             memo_text = form.get(memo_key, "")
 
             log = db.exec(
-                select(DailyLog).where(DailyLog.date == date_obj, DailyLog.step_id == step.id)
+                select(DailyLog).where(
+                    DailyLog.date == date_obj,
+                    DailyLog.step_id == step.id,
+                    DailyLog.guest_id == guest_id,
+                )
             ).first()
             if not log:
-                log = DailyLog(date=date_obj, step_id=step.id)
+                log = DailyLog(guest_id=guest_id, date=date_obj, step_id=step.id)
                 db.add(log)
 
             log.done = is_done
             log.memo = memo_text
 
-        custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
+        custom_tasks = db.exec(
+            select(CustomTask).where(CustomTask.date == date_obj, CustomTask.guest_id == guest_id)
+        ).all()
         for task in custom_tasks:
             done_key = f"custom_done_{task.id}"
             memo_key = f"custom_memo_{task.id}"
@@ -378,8 +486,9 @@ async def day_view(
 
 
 # 日本語: 曜日指定のルーチン一覧API / English: Routine list API filtered by weekday
-def api_routines_by_day(weekday: int, db: Session, *, get_weekday_routines_fn):
-    routines = get_weekday_routines_fn(db, weekday)
+def api_routines_by_day(weekday: int, db: Session, *, get_weekday_routines_fn, request: Request | None = None):
+    guest_id = _resolve_guest_id(request)
+    routines = _call_get_weekday_routines(get_weekday_routines_fn, db, weekday, guest_id)
     serialized_routines = []
     for routine in routines:
         steps = []
@@ -394,8 +503,9 @@ def api_routines_by_day(weekday: int, db: Session, *, get_weekday_routines_fn):
 
 
 # 日本語: 全ルーチン一覧API / English: API for listing all routines
-def api_routines(db: Session):
-    routines = db.exec(select(Routine)).all()
+def api_routines(db: Session, request: Request | None = None):
+    guest_id = _resolve_guest_id(request)
+    routines = db.exec(select(Routine).where(Routine.guest_id == guest_id)).all()
     serialized_routines = []
     for routine in routines:
         steps = []
@@ -420,12 +530,13 @@ def routines_list(request: Request, *, template_response_fn):
 
 # 日本語: ルーチン作成POST / English: Create routine from form POST
 async def add_routine(request: Request, db: Session):
+    guest_id = _resolve_guest_id(request)
     form = await request.form()
     name = form.get("name")
     days = ",".join(form.getlist("days"))
     desc = form.get("description")
     if name:
-        routine = Routine(name=name, days=days, description=desc)
+        routine = Routine(guest_id=guest_id, name=name, days=days, description=desc)
         db.add(routine)
         db.commit()
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
@@ -433,8 +544,9 @@ async def add_routine(request: Request, db: Session):
 
 # 日本語: ルーチン削除POST / English: Delete routine from form POST
 def delete_routine(request: Request, id: int, db: Session):
+    guest_id = _resolve_guest_id(request)
     routine = db.get(Routine, id)
-    if not routine:
+    if not routine or routine.guest_id != guest_id:
         raise HTTPException(status_code=404, detail="Routine not found")
     db.delete(routine)
     db.commit()
@@ -443,15 +555,22 @@ def delete_routine(request: Request, id: int, db: Session):
 
 # 日本語: ルーチンへのステップ追加POST / English: Add step to routine via form POST
 async def add_step(request: Request, id: int, db: Session):
+    guest_id = _resolve_guest_id(request)
     form = await request.form()
     routine = db.get(Routine, id)
-    if not routine:
+    if not routine or routine.guest_id != guest_id:
         raise HTTPException(status_code=404, detail="Routine not found")
     name = form.get("name")
     time_value = form.get("time")
     category = form.get("category")
     if name:
-        step = Step(routine_id=routine.id, name=name, time=time_value, category=category)
+        step = Step(
+            guest_id=guest_id,
+            routine_id=routine.id,
+            name=name,
+            time=time_value,
+            category=category,
+        )
         db.add(step)
         db.commit()
     return RedirectResponse(url=str(request.url_for("routines_list")), status_code=303)
@@ -459,8 +578,9 @@ async def add_step(request: Request, id: int, db: Session):
 
 # 日本語: ステップ削除POST / English: Delete step via form POST
 def delete_step(request: Request, id: int, db: Session):
+    guest_id = _resolve_guest_id(request)
     step = db.get(Step, id)
-    if not step:
+    if not step or step.guest_id != guest_id:
         raise HTTPException(status_code=404, detail="Step not found")
     db.delete(step)
     db.commit()
@@ -491,7 +611,7 @@ async def update_model_settings(request: Request, *, update_override_fn=update_o
     try:
         provider, model, base_url, _ = update_override_fn(selection if selection else None)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"モデル設定の更新に失敗しました: {exc}")
+        raise_internal_server_error("モデル設定の更新に失敗しました。", exc=exc)
     return {"status": "ok", "applied": {"provider": provider, "model": model, "base_url": base_url}}
 
 
@@ -503,17 +623,22 @@ async def manage_chat_history(
     extract_execution_trace_fn,
     delete_fn=sa_delete,
 ):
+    guest_id = _resolve_guest_id(request)
     if request.method == "DELETE":
         # 日本語: 全履歴クリア / English: Clear all chat history rows
         try:
-            db.exec(delete_fn(ChatHistory))
+            db.exec(_scoped_delete_statement(delete_fn, ChatHistory, guest_id))
             db.commit()
             return {"status": "cleared"}
         except Exception as exc:
             db.rollback()
-            raise HTTPException(status_code=500, detail=str(exc))
+            raise_internal_server_error("チャット履歴の削除に失敗しました。", exc=exc)
 
-    history = db.exec(select(ChatHistory).order_by(ChatHistory.timestamp)).all()
+    history = db.exec(
+        select(ChatHistory)
+        .where(ChatHistory.guest_id == guest_id)
+        .order_by(ChatHistory.timestamp)
+    ).all()
     serialized_history = []
     for item in history:
         # 日本語: 保存時に埋め込んだ execution trace を展開 / English: Extract embedded execution trace from stored content
@@ -564,7 +689,8 @@ async def chat(request: Request, db: Session, *, process_chat_request_fn):
     recent_messages = formatted_messages[-10:]
 
     # 日本語: 最新10件のみで推論負荷を制御 / English: Limit context to recent 10 messages
-    return process_chat_request_fn(db, recent_messages)
+    guest_id = _resolve_guest_id(request)
+    return _call_process_chat_request(process_chat_request_fn, db, recent_messages, guest_id)
 
 
 # 日本語: 評価画面 / English: Evaluation page
@@ -580,6 +706,7 @@ async def evaluation_chat(
     run_scheduler_multi_step_fn,
     build_final_reply_fn,
 ):
+    _require_dangerous_eval_api_enabled()
     try:
         payload = await request.json()
     except Exception:
@@ -602,7 +729,14 @@ async def evaluation_chat(
         raise HTTPException(status_code=400, detail="last message must be from user")
 
     today = datetime.date.today()
-    execution = run_scheduler_multi_step_fn(db, formatted_messages, today)
+    guest_id = _resolve_guest_id(request)
+    execution = _call_run_scheduler_multi_step(
+        run_scheduler_multi_step_fn,
+        db,
+        formatted_messages,
+        today,
+        guest_id,
+    )
     reply_text = execution.get("reply_text", "")
     results = execution.get("results", [])
     errors = execution.get("errors", [])
@@ -627,22 +761,26 @@ async def evaluation_chat(
 
 
 # 日本語: 評価用データを初期化 / English: Reset scheduler data for evaluation runs
-def evaluation_reset(db: Session, *, delete_fn=sa_delete):
+def evaluation_reset(request: Request | None, db: Session, *, delete_fn=sa_delete):
+    _require_dangerous_eval_api_enabled()
     try:
-        db.exec(delete_fn(DailyLog))
-        db.exec(delete_fn(CustomTask))
-        db.exec(delete_fn(Step))
-        db.exec(delete_fn(Routine))
-        db.exec(delete_fn(DayLog))
+        target_guest_id = _resolve_guest_id(request)
+        db.exec(_scoped_delete_statement(delete_fn, DailyLog, target_guest_id))
+        db.exec(_scoped_delete_statement(delete_fn, CustomTask, target_guest_id))
+        db.exec(_scoped_delete_statement(delete_fn, Step, target_guest_id))
+        db.exec(_scoped_delete_statement(delete_fn, Routine, target_guest_id))
+        db.exec(_scoped_delete_statement(delete_fn, DayLog, target_guest_id))
+        db.exec(_scoped_delete_statement(delete_fn, EvaluationResult, target_guest_id))
         db.commit()
         return {"status": "ok", "message": "Scheduler data cleared."}
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise_internal_server_error("評価データの初期化に失敗しました。", exc=exc)
 
 
 # 日本語: 単日シード投入 / English: Seed evaluation data for a single date
 async def evaluation_seed(request: Request, db: Session, *, seed_evaluation_data_fn):
+    _require_dangerous_eval_api_enabled()
     try:
         payload = await request.json()
     except Exception:
@@ -653,12 +791,14 @@ async def evaluation_seed(request: Request, db: Session, *, seed_evaluation_data
     else:
         target_date = datetime.date.today()
 
-    messages = seed_evaluation_data_fn(db, target_date, target_date)
+    guest_id = _resolve_guest_id(request)
+    messages = _call_seed_evaluation_data(seed_evaluation_data_fn, db, target_date, target_date, guest_id)
     return {"status": "ok", "message": "; ".join(messages)}
 
 
 # 日本語: 期間シード投入 / English: Seed evaluation data for a date range
 async def evaluation_seed_period(request: Request, db: Session, *, seed_evaluation_data_fn):
+    _require_dangerous_eval_api_enabled()
     try:
         payload = await request.json()
     except Exception:
@@ -675,14 +815,17 @@ async def evaluation_seed_period(request: Request, db: Session, *, seed_evaluati
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date cannot be after end_date")
 
-    messages = seed_evaluation_data_fn(db, start_date, end_date)
+    guest_id = _resolve_guest_id(request)
+    messages = _call_seed_evaluation_data(seed_evaluation_data_fn, db, start_date, end_date, guest_id)
     return {"status": "ok", "message": "; ".join(messages)}
 
 
 # 日本語: サンプルデータ投入API / English: Seed sample data endpoint
-def add_sample_data(db: Session, *, seed_sample_data_fn):
+def add_sample_data(request: Request | None, db: Session, *, seed_sample_data_fn):
+    _require_dangerous_eval_api_enabled()
     try:
-        messages = seed_sample_data_fn(db)
+        guest_id = _resolve_guest_id(request)
+        messages = _call_seed_sample_data(seed_sample_data_fn, db, guest_id)
 
         if not messages:
             return {"status": "ok", "message": "Data already exists, nothing new seeded."}
@@ -691,17 +834,19 @@ def add_sample_data(db: Session, *, seed_sample_data_fn):
 
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise_internal_server_error("サンプルデータ投入に失敗しました。", exc=exc)
 
 
 # 日本語: 評価ログ保存API / English: Persist evaluation result record
 async def evaluation_log(request: Request, db: Session):
+    _require_dangerous_eval_api_enabled()
     try:
         data = await request.json()
     except Exception:
         data = {}
     try:
         result = EvaluationResult(
+            guest_id=_resolve_guest_id(request),
             model_name=data.get("model_name"),
             task_prompt=data.get("task_prompt"),
             agent_reply=data.get("agent_reply"),
@@ -714,13 +859,16 @@ async def evaluation_log(request: Request, db: Session):
         return {"status": "ok"}
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise_internal_server_error("評価ログの保存に失敗しました。", exc=exc)
 
 
 # 日本語: 評価履歴一覧API / English: List evaluation result history
-def evaluation_history(db: Session):
+def evaluation_history(db: Session, request: Request | None = None):
+    guest_id = _resolve_guest_id(request)
     results = db.exec(
-        select(EvaluationResult).order_by(EvaluationResult.timestamp.desc())
+        select(EvaluationResult)
+        .where(EvaluationResult.guest_id == guest_id)
+        .order_by(EvaluationResult.timestamp.desc())
     ).all()
     data = []
     for result in results:

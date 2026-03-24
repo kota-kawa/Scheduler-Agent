@@ -109,7 +109,7 @@ def test_call_scheduler_llm_returns_limit_message_when_quota_exceeded(monkeypatc
             "blocked": False,
             "category": None,
             "rationale": None,
-            "error": "今月のLLM API利用上限（1000回）に達しました。",
+            "error": "今月のLLM API利用上限に達しました。",
             "limit_exceeded": True,
             "raw": None,
         },

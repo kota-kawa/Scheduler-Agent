@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlmodel import Session
 
 from scheduler_agent.core.db import get_db
@@ -14,6 +14,11 @@ router = APIRouter()
 
 
 @router.get("/api/day/{date_str}", name="api_day_view")
-def api_day_view(date_str: str, db: Session = Depends(get_db)):
+def api_day_view(date_str: str, request: Request, db: Session = Depends(get_db)):
     # 日本語: 指定日のタイムライン取得 / English: Return timeline for the specified date
-    return web_handlers.api_day_view(date_str, db, get_timeline_data_fn=_get_timeline_data)
+    return web_handlers.api_day_view(
+        date_str,
+        db,
+        get_timeline_data_fn=_get_timeline_data,
+        request=request,
+    )

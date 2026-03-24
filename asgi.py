@@ -8,6 +8,7 @@ from starlette.routing import Mount
 
 from app import app as main_app
 from mcp_server import mcp_server
+from scheduler_agent.core.config import mcp_auth_token, mcp_enabled
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("scheduler_asgi")
@@ -19,7 +20,32 @@ app = FastAPI()
 _transport = SseServerTransport("/messages")
 
 
+def _authorization_token(scope) -> str:
+    headers = scope.get("headers") or []
+    for key, value in headers:
+        if key.decode("latin1").lower() != "authorization":
+            continue
+        raw_auth = value.decode("latin1").strip()
+        scheme, _, token = raw_auth.partition(" ")
+        if scheme.lower() != "bearer":
+            return ""
+        return token.strip()
+    return ""
+
+
+def _mcp_authorized(scope) -> bool:
+    expected = mcp_auth_token()
+    if not expected:
+        return False
+    return _authorization_token(scope) == expected
+
+
 async def _sse_app(scope, receive, send):
+    if not _mcp_authorized(scope):
+        response = Response(status_code=401, content="Unauthorized")
+        await response(scope, receive, send)
+        return
+
     # 日本語: SSE の HTTP GET 以外を拒否 / English: Reject non-GET for SSE
     if scope["type"] != "http" or scope.get("method") != "GET":
         response = Response(status_code=405, content="Method not allowed")
@@ -41,14 +67,25 @@ async def _sse_app(scope, receive, send):
         )
 
 
+async def _messages_app(scope, receive, send):
+    if not _mcp_authorized(scope):
+        response = Response(status_code=401, content="Unauthorized")
+        await response(scope, receive, send)
+        return
+    await _transport.handle_post_message(scope, receive, send)
+
+
 # 日本語: MCP 通信用 ASGI サブアプリ / English: MCP ASGI sub-application
 mcp_asgi_app = Starlette(
     routes=[
         Mount("/sse", app=_sse_app),
-        Mount("/messages", app=_transport.handle_post_message),
+        Mount("/messages", app=_messages_app),
     ]
 )
 
 # 日本語: /mcp に MCP を、/ にメインアプリをマウント / English: Mount MCP and main app
-app.mount("/mcp", mcp_asgi_app)
+if mcp_enabled():
+    app.mount("/mcp", mcp_asgi_app)
+else:
+    logger.info("MCP endpoint is disabled by configuration.")
 app.mount("/", main_app)

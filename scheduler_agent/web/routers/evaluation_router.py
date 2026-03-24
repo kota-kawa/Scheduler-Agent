@@ -28,9 +28,9 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/api/evaluation/reset", name="evaluation_reset")
-def evaluation_reset(db: Session = Depends(get_db)):
+def evaluation_reset(request: Request, db: Session = Depends(get_db)):
     # 日本語: 評価用データをリセット / English: Reset evaluation data
-    return web_handlers.evaluation_reset(db, delete_fn=delete)
+    return web_handlers.evaluation_reset(request, db, delete_fn=delete)
 
 
 @router.post("/api/evaluation/seed", name="evaluation_seed")
@@ -54,9 +54,9 @@ async def evaluation_seed_period(request: Request, db: Session = Depends(get_db)
 
 
 @router.post("/api/add_sample_data", name="add_sample_data")
-def add_sample_data(db: Session = Depends(get_db)):
+def add_sample_data(request: Request, db: Session = Depends(get_db)):
     # 日本語: 手動確認用サンプルデータ投入 / English: Seed sample data for manual checks
-    return web_handlers.add_sample_data(db, seed_sample_data_fn=seed_sample_data)
+    return web_handlers.add_sample_data(request, db, seed_sample_data_fn=seed_sample_data)
 
 
 @router.post("/api/evaluation/log", name="evaluation_log")
@@ -66,6 +66,6 @@ async def evaluation_log(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/api/evaluation/history", name="evaluation_history")
-def evaluation_history(db: Session = Depends(get_db)):
+def evaluation_history(request: Request, db: Session = Depends(get_db)):
     # 日本語: 評価履歴取得 / English: Fetch evaluation history list
-    return web_handlers.evaluation_history(db)
+    return web_handlers.evaluation_history(db, request=request)

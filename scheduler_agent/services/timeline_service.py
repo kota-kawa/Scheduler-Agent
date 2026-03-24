@@ -10,9 +10,9 @@ from sqlmodel import Session, select
 from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine
 
 
-def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
+def get_weekday_routines(db: Session, weekday_int: int, guest_id: str = "default") -> List[Routine]:
     # 日本語: days カラム(カンマ区切り)から該当曜日のルーチンを抽出 / English: Filter routines by weekday using comma-separated days column
-    all_routines = db.exec(select(Routine)).all()
+    all_routines = db.exec(select(Routine).where(Routine.guest_id == guest_id)).all()
     matched = []
     for routine in all_routines:
         if str(weekday_int) in (routine.days or "").split(","):
@@ -20,10 +20,12 @@ def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
     return matched
 
 
-def _get_timeline_data(db: Session, date_obj: datetime.date):
+def _get_timeline_data(db: Session, date_obj: datetime.date, guest_id: str = "default"):
     # 日本語: 指定日のルーチンステップ+カスタムタスクを時系列で構築 / English: Build chronological timeline from routine steps and custom tasks
-    routines = get_weekday_routines(db, date_obj.weekday())
-    custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == date_obj)).all()
+    routines = get_weekday_routines(db, date_obj.weekday(), guest_id=guest_id)
+    custom_tasks = db.exec(
+        select(CustomTask).where(CustomTask.date == date_obj, CustomTask.guest_id == guest_id)
+    ).all()
 
     timeline_items = []
     total_items = 0
@@ -33,7 +35,11 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
         for step in routine.steps:
             # 日本語: ステップごとの当日ログを紐づける / English: Attach per-step daily log for the target date
             log = db.exec(
-                select(DailyLog).where(DailyLog.date == date_obj, DailyLog.step_id == step.id)
+                select(DailyLog).where(
+                    DailyLog.date == date_obj,
+                    DailyLog.step_id == step.id,
+                    DailyLog.guest_id == guest_id,
+                )
             ).first()
             timeline_items.append(
                 {
@@ -75,20 +81,27 @@ def _get_timeline_data(db: Session, date_obj: datetime.date):
     return timeline_items, completion_rate
 
 
-def _build_scheduler_context(db: Session, today: datetime.date | None = None) -> str:
+def _build_scheduler_context(db: Session, today: datetime.date | None = None, guest_id: str = "default") -> str:
     # 日本語: LLM が参照する「本日中心」の状態テキストを生成 / English: Build "today-focused" context text for LLM consumption
     today = today or datetime.date.today()
-    routines = db.exec(select(Routine)).all()
+    routines = db.exec(select(Routine).where(Routine.guest_id == guest_id)).all()
     today_logs = {
-        log.step_id: log for log in db.exec(select(DailyLog).where(DailyLog.date == today)).all()
+        log.step_id: log
+        for log in db.exec(
+            select(DailyLog).where(DailyLog.date == today, DailyLog.guest_id == guest_id)
+        ).all()
     }
-    custom_tasks = db.exec(select(CustomTask).where(CustomTask.date == today)).all()
+    custom_tasks = db.exec(
+        select(CustomTask).where(CustomTask.date == today, CustomTask.guest_id == guest_id)
+    ).all()
 
     recent_day_logs = []
     for i in range(3):
         # 日本語: 直近3日の日報を補助コンテキストとして添付 / English: Include recent 3-day logs as auxiliary context
         date_value = today - datetime.timedelta(days=i)
-        day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
+        day_log = db.exec(
+            select(DayLog).where(DayLog.date == date_value, DayLog.guest_id == guest_id)
+        ).first()
         if day_log and day_log.content:
             recent_day_logs.append(f"Date: {date_value.isoformat()} | Content: {day_log.content}")
 

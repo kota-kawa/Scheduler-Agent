@@ -13,9 +13,11 @@ class ChatHistory(SQLModel, table=True):
     __tablename__ = "chat_history"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     role: str = Field(max_length=20)
     content: str = Field(sa_column=Column(Text, nullable=False))
     timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now)
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
 
 
 # 日本語: 評価実験の結果保存テーブル / English: Stored evaluation run results
@@ -23,6 +25,7 @@ class EvaluationResult(SQLModel, table=True):
     __tablename__ = "evaluation_result"
 
     id: int | None = Field(default=None, primary_key=True)
+    guest_id: str = Field(default="default", max_length=64, nullable=False, index=True)
     timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now)
     model_name: str | None = Field(default=None, max_length=100)
     task_prompt: str | None = Field(default=None, sa_column=Column(Text))
@@ -30,6 +33,7 @@ class EvaluationResult(SQLModel, table=True):
     tool_calls: str | None = Field(default=None, sa_column=Column(Text))
     is_success: bool | None = Field(default=None)
     comments: str | None = Field(default=None, sa_column=Column(Text))
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, nullable=False)
 
 
 # 日本語: 月次のLLM API利用回数カウンタ / English: Monthly LLM API usage counter

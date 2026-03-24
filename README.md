@@ -89,6 +89,46 @@ SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT=1000
 SCHEDULER_MAX_INPUT_CHARS=10000
 # Max output tokens per LLM call (optional, default: 5000)
 SCHEDULER_MAX_OUTPUT_TOKENS=5000
+
+# ---- Public demo hardening (recommended) ----
+APP_ENV=production
+SCHEDULER_TRUSTED_HOSTS=localhost,127.0.0.1,your-demo-domain.example
+SCHEDULER_PROXY_TRUSTED_HOSTS=127.0.0.1,::1,localhost
+SCHEDULER_FORCE_HTTPS=true
+SCHEDULER_SESSION_HTTPS_ONLY=true
+SCHEDULER_SESSION_SAME_SITE=lax
+SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false
+SCHEDULER_ENABLE_MCP=false
+# If MCP must be enabled, require bearer token:
+# SCHEDULER_ENABLE_MCP=true
+# SCHEDULER_MCP_AUTH_TOKEN=replace-with-long-random-token
+SCHEDULER_RATE_LIMIT_WINDOW_SECONDS=60
+SCHEDULER_RATE_LIMIT_MAX_REQUESTS=120
+SCHEDULER_REQUEST_TIMEOUT_SECONDS=30
+SCHEDULER_MAX_REQUEST_BODY_BYTES=262144
+SCHEDULER_GUEST_DATA_TTL_HOURS=72
+SCHEDULER_GUEST_CLEANUP_INTERVAL_SECONDS=300
+```
+
+```env
+# secrets.env の例（公開デモ向けの推奨設定）
+APP_ENV=production
+SCHEDULER_TRUSTED_HOSTS=localhost,127.0.0.1,your-demo-domain.example
+SCHEDULER_PROXY_TRUSTED_HOSTS=127.0.0.1,::1,localhost
+SCHEDULER_FORCE_HTTPS=true
+SCHEDULER_SESSION_HTTPS_ONLY=true
+SCHEDULER_SESSION_SAME_SITE=lax
+SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false
+SCHEDULER_ENABLE_MCP=false
+# MCP を有効化する場合のみ固定トークンを設定
+# SCHEDULER_ENABLE_MCP=true
+# SCHEDULER_MCP_AUTH_TOKEN=replace-with-long-random-token
+SCHEDULER_RATE_LIMIT_WINDOW_SECONDS=60
+SCHEDULER_RATE_LIMIT_MAX_REQUESTS=120
+SCHEDULER_REQUEST_TIMEOUT_SECONDS=30
+SCHEDULER_MAX_REQUEST_BODY_BYTES=262144
+SCHEDULER_GUEST_DATA_TTL_HOURS=72
+SCHEDULER_GUEST_CLEANUP_INTERVAL_SECONDS=300
 ```
 
 ### 2) Start the app
@@ -102,6 +142,8 @@ docker network create multi_agent_platform_net
 docker compose up --build
 ```
 
+> Security note: the default `docker-compose.yml` no longer publishes PostgreSQL to host ports. Keep DB access internal to the Compose network for public deployments.
+
 ### 3) Open the app
 Once the logs settle, open the app in your browser:
 
@@ -113,6 +155,34 @@ When you’re done, stop the containers:
 ```bash
 docker compose down
 ```
+
+---
+
+## 🔐 Public demo security checklist
+
+For “anyone can access immediately” deployments, keep these enabled:
+
+- Dangerous evaluation APIs disabled: `SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false`
+- MCP endpoint disabled (or token-protected): `SCHEDULER_ENABLE_MCP=false` or set `SCHEDULER_MCP_AUTH_TOKEN`
+- Trusted hosts configured: `SCHEDULER_TRUSTED_HOSTS=...`
+- HTTPS redirect + secure session cookie enabled
+- Request guard active (`rate limit`, `timeout`, `max body size`)
+- Anonymous data isolation via `guest_id` and short retention TTL
+- DB container port not exposed externally
+
+---
+
+## 🔐 公開デモ向けセキュリティチェックリスト
+
+「誰でもすぐ試せる公開」を前提にする場合、以下を必ず有効化してください。
+
+- 破壊系評価APIを無効化: `SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false`
+- MCPは無効化（または固定トークン必須）: `SCHEDULER_ENABLE_MCP=false` / `SCHEDULER_MCP_AUTH_TOKEN=...`
+- 許可Hostを制限: `SCHEDULER_TRUSTED_HOSTS=...`
+- HTTPSリダイレクトとSecure/SameSite付きセッションCookieを有効化
+- リクエストガード（レート制限・タイムアウト・本文サイズ上限）を有効化
+- `guest_id` による匿名データ分離と短期TTL削除を有効化
+- DBコンテナのポートを外部公開しない（`docker-compose.yml` は非公開設定）
 
 ---
 

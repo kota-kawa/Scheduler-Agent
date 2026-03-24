@@ -6,6 +6,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+calendar_router_module = importlib.import_module("scheduler_agent.web.routers.calendar_router")
+chat_router_module = importlib.import_module("scheduler_agent.web.routers.chat_router")
+day_router_module = importlib.import_module("scheduler_agent.web.routers.day_router")
+routines_router_module = importlib.import_module("scheduler_agent.web.routers.routines_router")
+
 
 class _ExecResult:
     def __init__(self, items=None):
@@ -68,6 +73,16 @@ def app_module(monkeypatch):
         del sys.modules["app"]
     loaded_app = importlib.import_module("app")
     monkeypatch.setattr(loaded_app, "_ensure_db_initialized", lambda: None)
+    import scheduler_agent.application as app_package
+
+    monkeypatch.setattr(app_package, "_init_db", lambda: None)
+    monkeypatch.setattr(app_package, "cleanup_expired_guest_data_if_due", lambda _db: None)
+
+    @contextmanager
+    def _noop_cleanup_session():
+        yield _FakeDb()
+
+    monkeypatch.setattr(app_package, "create_session", _noop_cleanup_session)
     return loaded_app
 
 
@@ -81,7 +96,11 @@ def _client_with_db(app_module, fake_db):
 
 def test_calendar_endpoint_rollover_and_payload_shape(app_module, monkeypatch):
     fake_db = _FakeDb(default_items=[])
-    monkeypatch.setattr(app_module, "get_weekday_routines", lambda _db, _weekday: [])
+    monkeypatch.setattr(
+        calendar_router_module,
+        "get_weekday_routines",
+        lambda _db, _weekday, guest_id="default": [],
+    )
 
     with _client_with_db(app_module, fake_db) as client:
         response = client.get("/api/calendar?year=2026&month=13")
@@ -135,7 +154,11 @@ def test_day_endpoint_serializes_timeline_items(app_module, monkeypatch):
             "real_obj": SimpleNamespace(done=True),
         },
     ]
-    monkeypatch.setattr(app_module, "_get_timeline_data", lambda _db, _date: (timeline_items, 67))
+    monkeypatch.setattr(
+        day_router_module,
+        "_get_timeline_data",
+        lambda _db, _date, guest_id="default": (timeline_items, 67),
+    )
     fake_db = _FakeDb(queued_results=[[SimpleNamespace(content="daily note")]])
 
     with _client_with_db(app_module, fake_db) as client:
@@ -163,7 +186,11 @@ def test_routines_by_day_endpoint_sorts_steps_by_time(app_module, monkeypatch):
             SimpleNamespace(id=12, name="Coffee", time="08:00", category="Lifestyle"),
         ],
     )
-    monkeypatch.setattr(app_module, "get_weekday_routines", lambda _db, _weekday: [routine])
+    monkeypatch.setattr(
+        routines_router_module,
+        "get_weekday_routines",
+        lambda _db, _weekday, guest_id="default": [routine],
+    )
 
     with _client_with_db(app_module, _FakeDb()) as client:
         response = client.get("/api/routines/day/2")
@@ -206,8 +233,9 @@ def test_chat_endpoint_rejects_oversized_input_message(app_module, monkeypatch):
 def test_chat_endpoint_passes_only_recent_ten_messages(app_module, monkeypatch):
     captured = {}
 
-    def _fake_process_chat_request(_db, recent_messages):
+    def _fake_process_chat_request(_db, recent_messages, guest_id="default"):
         captured["recent_messages"] = recent_messages
+        captured["guest_id"] = guest_id
         return {
             "reply": "ok",
             "should_refresh": False,
@@ -215,7 +243,7 @@ def test_chat_endpoint_passes_only_recent_ten_messages(app_module, monkeypatch):
             "execution_trace": [],
         }
 
-    monkeypatch.setattr(app_module, "process_chat_request", _fake_process_chat_request)
+    monkeypatch.setattr(chat_router_module, "process_chat_request", _fake_process_chat_request)
 
     messages = [{"role": "user", "content": f"m{i}"} for i in range(11)]
 
@@ -227,6 +255,7 @@ def test_chat_endpoint_passes_only_recent_ten_messages(app_module, monkeypatch):
     assert len(captured["recent_messages"]) == 10
     assert captured["recent_messages"][0]["content"] == "m1"
     assert captured["recent_messages"][-1]["content"] == "m10"
+    assert captured["guest_id"]
 
 
 def test_model_settings_rejects_invalid_selection_type(app_module):

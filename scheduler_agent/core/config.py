@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import List
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,154 @@ SESSION_SECRET = os.getenv("SESSION_SECRET")
 # 日本語: assistant 応答に execution trace を埋め込むためのマーカー / English: Markers for embedding execution trace in stored replies
 EXEC_TRACE_MARKER_PREFIX = "[[EXEC_TRACE_B64:"
 EXEC_TRACE_MARKER_SUFFIX = "]]"
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    # 日本語: 真偽値環境変数の安全な解釈 / English: Safely parse boolean environment variable
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int_env(name: str, default: int, minimum: int = 1, maximum: int | None = None) -> int:
+    # 日本語: 整数環境変数の安全な解釈とクランプ / English: Parse integer env safely and clamp
+    raw_value = os.getenv(name, str(default))
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = default
+    if maximum is None:
+        return max(minimum, parsed)
+    return max(minimum, min(parsed, maximum))
+
+
+def _csv_env(name: str, default: str) -> List[str]:
+    # 日本語: CSV 環境変数を空要素除去して配列化 / English: Parse CSV env var into non-empty items
+    raw = os.getenv(name, default)
+    values = [item.strip() for item in str(raw).split(",")]
+    return [item for item in values if item]
+
+
+def is_production_environment() -> bool:
+    # 日本語: 本番判定フラグ / English: Production-mode flag
+    env = os.getenv("APP_ENV", os.getenv("ENV", "development"))
+    return str(env).strip().lower() in {"production", "prod"}
+
+
+def dangerous_evaluation_api_enabled() -> bool:
+    # 日本語: 破壊的評価APIの公開可否 / English: Toggle for destructive evaluation endpoints
+    return _bool_env(
+        "SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS",
+        default=not is_production_environment(),
+    )
+
+
+def mcp_enabled() -> bool:
+    # 日本語: MCP エンドポイント公開可否 / English: Toggle for exposing MCP endpoint
+    return _bool_env("SCHEDULER_ENABLE_MCP", default=False)
+
+
+def mcp_auth_token() -> str:
+    # 日本語: MCP 固定トークン / English: Fixed token required for MCP access
+    return str(os.getenv("SCHEDULER_MCP_AUTH_TOKEN", "")).strip()
+
+
+def trusted_host_patterns() -> List[str]:
+    # 日本語: Host ヘッダ許可リスト / English: Allowed Host header patterns
+    return _csv_env(
+        "SCHEDULER_TRUSTED_HOSTS",
+        "localhost,127.0.0.1,testserver",
+    )
+
+
+def proxy_trusted_hosts() -> List[str]:
+    # 日本語: ProxyHeaders を信頼する送信元ホスト / English: Trusted proxy hosts for ProxyHeaders middleware
+    return _csv_env(
+        "SCHEDULER_PROXY_TRUSTED_HOSTS",
+        "127.0.0.1,::1,localhost",
+    )
+
+
+def https_redirect_enabled() -> bool:
+    # 日本語: HTTPS リダイレクトの有効化 / English: Enable HTTPS redirect middleware
+    return _bool_env(
+        "SCHEDULER_FORCE_HTTPS",
+        default=is_production_environment(),
+    )
+
+
+def session_cookie_https_only() -> bool:
+    # 日本語: セッションCookieにSecure属性を付与 / English: Set Secure attribute on session cookie
+    return _bool_env(
+        "SCHEDULER_SESSION_HTTPS_ONLY",
+        default=is_production_environment(),
+    )
+
+
+def session_cookie_same_site() -> str:
+    # 日本語: SameSite 属性 / English: Session cookie SameSite attribute
+    raw_value = str(os.getenv("SCHEDULER_SESSION_SAME_SITE", "lax")).strip().lower()
+    if raw_value not in {"lax", "strict", "none"}:
+        return "lax"
+    return raw_value
+
+
+def session_cookie_name() -> str:
+    # 日本語: セッションCookie名 / English: Session cookie name
+    raw_value = str(os.getenv("SCHEDULER_SESSION_COOKIE_NAME", "session")).strip()
+    return raw_value or "session"
+
+
+def session_cookie_max_age_seconds() -> int:
+    # 日本語: セッションCookie有効期限 / English: Session cookie max age (seconds)
+    return _int_env("SCHEDULER_SESSION_MAX_AGE_SECONDS", 60 * 60 * 24 * 7, minimum=60)
+
+
+def guest_cookie_name() -> str:
+    # 日本語: 匿名ゲスト識別Cookie名 / English: Anonymous guest identifier cookie name
+    raw_value = str(os.getenv("SCHEDULER_GUEST_COOKIE_NAME", "guest_id")).strip()
+    return raw_value or "guest_id"
+
+
+def guest_cookie_max_age_seconds() -> int:
+    # 日本語: ゲストCookie有効期限 / English: Guest cookie max age (seconds)
+    return _int_env("SCHEDULER_GUEST_COOKIE_MAX_AGE_SECONDS", 60 * 60 * 24 * 3, minimum=60)
+
+
+def guest_data_ttl_hours() -> int:
+    # 日本語: 匿名データ保持期間（時間） / English: Guest data retention period in hours
+    return _int_env("SCHEDULER_GUEST_DATA_TTL_HOURS", 72, minimum=1)
+
+
+def guest_data_cleanup_interval_seconds() -> int:
+    # 日本語: TTL掃除の最小実行間隔 / English: Minimum interval for TTL cleanup runs
+    return _int_env("SCHEDULER_GUEST_CLEANUP_INTERVAL_SECONDS", 300, minimum=10)
+
+
+def request_rate_limit_window_seconds() -> int:
+    # 日本語: レート制限の時間窓 / English: Rate-limit rolling window in seconds
+    return _int_env("SCHEDULER_RATE_LIMIT_WINDOW_SECONDS", 60, minimum=1)
+
+
+def request_rate_limit_max_requests() -> int:
+    # 日本語: IPごとの最大リクエスト数 / English: Max requests per IP within the rate-limit window
+    return _int_env("SCHEDULER_RATE_LIMIT_MAX_REQUESTS", 120, minimum=1)
+
+
+def request_timeout_seconds() -> int:
+    # 日本語: APIタイムアウト秒数 / English: API request timeout in seconds
+    return _int_env("SCHEDULER_REQUEST_TIMEOUT_SECONDS", 30, minimum=1)
+
+
+def max_request_body_bytes() -> int:
+    # 日本語: APIリクエスト本文サイズ上限 / English: Maximum API request body size in bytes
+    return _int_env("SCHEDULER_MAX_REQUEST_BODY_BYTES", 262_144, minimum=1_024)
+
+
+def protected_api_prefixes() -> List[str]:
+    # 日本語: レート制限・ボディ上限の対象パス / English: Path prefixes protected by request guards
+    return _csv_env("SCHEDULER_PROTECTED_API_PREFIXES", "/api/,/model_settings")
 
 
 def get_max_action_rounds() -> int:

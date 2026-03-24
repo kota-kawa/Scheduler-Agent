@@ -63,23 +63,28 @@ def _resolve_schedule_expression(
     return parser_service._resolve_schedule_expression(expression, base_date, base_time, default_time)
 
 
-def get_weekday_routines(db: Session, weekday_int: int) -> List[Routine]:
+def get_weekday_routines(db: Session, weekday_int: int, guest_id: str = "default") -> List[Routine]:
     # 日本語: 曜日別ルーチン取得を timeline_service に委譲 / English: Delegate weekday routine lookup to timeline_service
-    return timeline_service_module.get_weekday_routines(db, weekday_int)
+    return timeline_service_module.get_weekday_routines(db, weekday_int, guest_id=guest_id)
 
 
-def _get_timeline_data(db: Session, date_obj: datetime.date):
-    return timeline_service_module._get_timeline_data(db, date_obj)
+def _get_timeline_data(db: Session, date_obj: datetime.date, guest_id: str = "default"):
+    return timeline_service_module._get_timeline_data(db, date_obj, guest_id=guest_id)
 
 
-def _build_scheduler_context(db: Session, today: datetime.date | None = None) -> str:
+def _build_scheduler_context(db: Session, today: datetime.date | None = None, guest_id: str = "default") -> str:
     # 日本語: LLM向けコンテキスト生成をサービス層で実行 / English: Build LLM context via service layer
-    return timeline_service_module._build_scheduler_context(db, today)
+    return timeline_service_module._build_scheduler_context(db, today, guest_id=guest_id)
 
 
-def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
+def _apply_actions(
+    db: Session,
+    actions: List[Dict[str, Any]],
+    default_date: datetime.date,
+    guest_id: str = "default",
+):
     # 日本語: ツールアクション適用の責務を action_service へ集約 / English: Centralize tool-action execution in action_service
-    return action_service_module._apply_actions(db, actions, default_date)
+    return action_service_module._apply_actions(db, actions, default_date, guest_id=guest_id)
 
 
 def _attach_execution_trace_to_stored_content(
@@ -115,6 +120,7 @@ def _run_scheduler_multi_step(
     formatted_messages: List[Dict[str, str]],
     today: datetime.date,
     max_rounds: int | None = None,
+    guest_id: str = "default",
 ) -> Dict[str, Any]:
     # 日本語: マルチラウンド実行エンジンを chat_service へ委譲 / English: Delegate multi-round orchestration to chat_service
     return chat_service_module._run_scheduler_multi_step(
@@ -122,6 +128,7 @@ def _run_scheduler_multi_step(
         formatted_messages,
         today,
         max_rounds,
+        guest_id,
         call_scheduler_llm_fn=call_scheduler_llm,
         build_scheduler_context_fn=_build_scheduler_context,
         apply_actions_fn=_apply_actions,
@@ -129,13 +136,17 @@ def _run_scheduler_multi_step(
 
 
 def process_chat_request(
-    db: Session, message_or_history: Union[str, List[Dict[str, str]]], save_history: bool = True
+    db: Session,
+    message_or_history: Union[str, List[Dict[str, str]]],
+    save_history: bool = True,
+    guest_id: str = "default",
 ) -> Dict[str, Any]:
     # 日本語: 互換APIとしてチャット処理を公開 / English: Expose chat processing through compatibility facade
     return chat_service_module.process_chat_request(
         db,
         message_or_history,
         save_history=save_history,
+        guest_id=guest_id,
         run_scheduler_multi_step_fn=_run_scheduler_multi_step,
         build_final_reply_fn=_build_final_reply,
         attach_execution_trace_fn=_attach_execution_trace_to_stored_content,
@@ -207,20 +218,25 @@ def embed_calendar(request: Request, db: Session = Depends(get_db)):
     return _template_page(web_handlers.embed_calendar, request)
 
 
-def api_day_view(date_str: str, db: Session = Depends(get_db)):
-    return web_handlers.api_day_view(date_str, db, get_timeline_data_fn=_get_timeline_data)
+def api_day_view(date_str: str, request: Request, db: Session = Depends(get_db)):
+    return web_handlers.api_day_view(date_str, db, get_timeline_data_fn=_get_timeline_data, request=request)
 
 
 async def day_view(request: Request, date_str: str, db: Session = Depends(get_db)):
     return await _date_page(web_handlers.day_view, request, date_str, db)
 
 
-def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
-    return web_handlers.api_routines_by_day(weekday, db, get_weekday_routines_fn=get_weekday_routines)
+def api_routines_by_day(weekday: int, request: Request, db: Session = Depends(get_db)):
+    return web_handlers.api_routines_by_day(
+        weekday,
+        db,
+        get_weekday_routines_fn=get_weekday_routines,
+        request=request,
+    )
 
 
-def api_routines(db: Session = Depends(get_db)):
-    return web_handlers.api_routines(db)
+def api_routines(request: Request, db: Session = Depends(get_db)):
+    return web_handlers.api_routines(db, request=request)
 
 
 def routines_list(request: Request, db: Session = Depends(get_db)):
@@ -285,14 +301,19 @@ async def evaluation_chat(request: Request, db: Session = Depends(get_db)):
     )
 
 
-def evaluation_reset(db: Session = Depends(get_db)):
+def evaluation_reset(request: Request, db: Session = Depends(get_db)):
     # 日本語: 評価データ初期化時に SQLAlchemy delete を注入 / English: Inject SQLAlchemy delete for evaluation reset
-    return web_handlers.evaluation_reset(db, delete_fn=delete)
+    return web_handlers.evaluation_reset(request, db, delete_fn=delete)
 
 
-def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
+def _seed_evaluation_data(
+    db: Session,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    guest_id: str = "default",
+):
     # 日本語: 互換エクスポート用のシード関数 / English: Compatibility export for evaluation seed helper
-    return eval_seed_service._seed_evaluation_data(db, start_date, end_date)
+    return eval_seed_service._seed_evaluation_data(db, start_date, end_date, guest_id=guest_id)
 
 
 async def evaluation_seed(request: Request, db: Session = Depends(get_db)):
@@ -303,16 +324,16 @@ async def evaluation_seed_period(request: Request, db: Session = Depends(get_db)
     return await _evaluation_seed_endpoint(web_handlers.evaluation_seed_period, request, db)
 
 
-def add_sample_data(db: Session = Depends(get_db)):
-    return web_handlers.add_sample_data(db, seed_sample_data_fn=eval_seed_service.seed_sample_data)
+def add_sample_data(request: Request, db: Session = Depends(get_db)):
+    return web_handlers.add_sample_data(request, db, seed_sample_data_fn=eval_seed_service.seed_sample_data)
 
 
 async def evaluation_log(request: Request, db: Session = Depends(get_db)):
     return await web_handlers.evaluation_log(request, db)
 
 
-def evaluation_history(db: Session = Depends(get_db)):
-    return web_handlers.evaluation_history(db)
+def evaluation_history(request: Request, db: Session = Depends(get_db)):
+    return web_handlers.evaluation_history(db, request=request)
 
 
 _MODEL_EXPORTS = [

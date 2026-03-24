@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, List
 
@@ -14,6 +15,8 @@ from scheduler_agent.core.config import (
     EXEC_TRACE_MARKER_SUFFIX,
     get_max_output_tokens,
 )
+
+logger = logging.getLogger("scheduler_agent.reply_service")
 
 
 def _remove_no_schedule_lines(text: str) -> str:
@@ -241,7 +244,7 @@ def _build_final_reply(
             final_reply = _build_pop_friendly_reply(user_message, results, errors)
     except Exception as exc:
         final_reply = _build_pop_friendly_reply(user_message, results, errors)
-        print(f"Summary LLM failed: {exc}")
+        logger.exception("Summary LLM failed; using fallback reply.", exc_info=exc)
 
     return _remove_no_schedule_lines(final_reply)
 

@@ -1,4 +1,7 @@
 """MCP server for Scheduler Agent."""
+
+from __future__ import annotations
+
 import logging
 from typing import Any, List
 
@@ -13,6 +16,7 @@ from app import create_session, process_chat_request
 
 # 日本語: MCP サーバーのインスタンス / English: MCP server instance
 mcp_server = Server("scheduler-agent")
+logger = logging.getLogger("scheduler_agent.mcp_server")
 
 
 @mcp_server.list_tools()
@@ -56,10 +60,11 @@ async def call_tool(name: str, arguments: Any) -> List[types.TextContent]:
             result = process_chat_request(db, instruction, save_history=False)
             reply = result.get("reply", "")
             return [types.TextContent(type="text", text=reply)]
-        except Exception as e:
-            logging.exception("Error processing schedule instruction")
-            return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+        except Exception as exc:
+            logger.exception("Error processing schedule instruction.", exc_info=exc)
+            return [types.TextContent(type="text", text="Error: request failed")]
         finally:
             db.close()
 
-    raise ValueError(f"Unknown tool: {name}")
+    logger.warning("Unknown tool requested: %s", name)
+    return [types.TextContent(type="text", text="Error: unknown tool")]

@@ -14,15 +14,20 @@ router = APIRouter()
 
 
 @router.get("/api/routines/day/{weekday}", name="api_routines_by_day")
-def api_routines_by_day(weekday: int, db: Session = Depends(get_db)):
+def api_routines_by_day(weekday: int, request: Request, db: Session = Depends(get_db)):
     # 日本語: 曜日別ルーチン取得 / English: Fetch routines by weekday
-    return web_handlers.api_routines_by_day(weekday, db, get_weekday_routines_fn=get_weekday_routines)
+    return web_handlers.api_routines_by_day(
+        weekday,
+        db,
+        get_weekday_routines_fn=get_weekday_routines,
+        request=request,
+    )
 
 
 @router.get("/api/routines", name="api_routines")
-def api_routines(db: Session = Depends(get_db)):
+def api_routines(request: Request, db: Session = Depends(get_db)):
     # 日本語: 全ルーチン取得 / English: Fetch all routines
-    return web_handlers.api_routines(db)
+    return web_handlers.api_routines(db, request=request)
 
 
 @router.post("/routines/add", name="add_routine")

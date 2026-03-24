@@ -9,16 +9,26 @@ from sqlmodel import Session, delete, select
 from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine, Step
 
 
-def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: datetime.date):
+def _seed_evaluation_data(
+    db: Session,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    guest_id: str = "default",
+):
     # 日本語: 指定期間の評価用データを毎日再生成 / English: Rebuild deterministic evaluation fixtures for each date in range
     messages = []
 
     routine_name = "Daily Routine"
     # 日本語: 評価用の基準ルーチンを1つ用意 / English: Ensure one baseline routine for evaluation scenarios
-    daily_routine = db.exec(select(Routine).where(Routine.name == routine_name)).first()
+    daily_routine = db.exec(
+        select(Routine).where(Routine.name == routine_name, Routine.guest_id == guest_id)
+    ).first()
     if not daily_routine:
         daily_routine = Routine(
-            name=routine_name, days="0,1,2,3,4,5,6", description="General daily habits"
+            guest_id=guest_id,
+            name=routine_name,
+            days="0,1,2,3,4,5,6",
+            description="General daily habits",
         )
         db.add(daily_routine)
         db.flush()
@@ -32,24 +42,31 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
             ("22:00", "Read Book", "Lifestyle"),
         ]
         for time_value, name, category in steps_data:
-            step = Step(routine_id=daily_routine.id, name=name, time=time_value, category=category)
+            step = Step(
+                guest_id=guest_id,
+                routine_id=daily_routine.id,
+                name=name,
+                time=time_value,
+                category=category,
+            )
             db.add(step)
         messages.append(f"Seeded Routine '{routine_name}'")
 
     current_date = start_date
     while current_date <= end_date:
         # 日本語: 対象日の既存データを初期化してから投入 / English: Clear existing rows before seeding target date data
-        db.exec(delete(DailyLog).where(DailyLog.date == current_date))
-        db.exec(delete(CustomTask).where(CustomTask.date == current_date))
-        db.exec(delete(DayLog).where(DayLog.date == current_date))
+        db.exec(delete(DailyLog).where(DailyLog.date == current_date, DailyLog.guest_id == guest_id))
+        db.exec(delete(CustomTask).where(CustomTask.date == current_date, CustomTask.guest_id == guest_id))
+        db.exec(delete(DayLog).where(DayLog.date == current_date, DayLog.guest_id == guest_id))
         messages.append(f"Cleared existing data for {current_date.isoformat()}")
 
         log_content = f"これは{current_date.isoformat()}の評価用日報です。今日の気分は最高です！"
-        db.add(DayLog(date=current_date, content=log_content))
+        db.add(DayLog(guest_id=guest_id, date=current_date, content=log_content))
         messages.append(f"Seeded DayLog for {current_date.isoformat()}")
 
         db.add(
             CustomTask(
+                guest_id=guest_id,
                 date=current_date,
                 name=f"ミーティング ({current_date.day}日)",
                 time="10:00",
@@ -58,6 +75,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
         )
         db.add(
             CustomTask(
+                guest_id=guest_id,
                 date=current_date,
                 name=f"レポート作成 ({current_date.day}日)",
                 time="14:00",
@@ -69,12 +87,16 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
         if daily_routine:
             # 日本語: 一部ステップのみ完了済みデータを作り、評価の差分を作る / English: Mark subset of steps done to create realistic mixed completion state
             all_steps = db.exec(
-                select(Step).where(Step.routine_id == daily_routine.id)
+                select(Step).where(Step.routine_id == daily_routine.id, Step.guest_id == guest_id)
             ).all()
             if all_steps:
                 if len(all_steps) >= 1:
                     log_entry = DailyLog(
-                        date=current_date, step_id=all_steps[0].id, done=True, memo="朝の活動完了"
+                        guest_id=guest_id,
+                        date=current_date,
+                        step_id=all_steps[0].id,
+                        done=True,
+                        memo="朝の活動完了",
                     )
                     db.add(log_entry)
                     messages.append(
@@ -82,7 +104,11 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
                     )
                 if len(all_steps) >= 3:
                     log_entry = DailyLog(
-                        date=current_date, step_id=all_steps[2].id, done=True, memo="メールチェック完了"
+                        guest_id=guest_id,
+                        date=current_date,
+                        step_id=all_steps[2].id,
+                        done=True,
+                        memo="メールチェック完了",
                     )
                     db.add(log_entry)
                     messages.append(
@@ -95,7 +121,7 @@ def _seed_evaluation_data(db: Session, start_date: datetime.date, end_date: date
     return messages
 
 
-def seed_sample_data(db: Session):
+def seed_sample_data(db: Session, guest_id: str = "default"):
     # 日本語: 手動確認用の軽量サンプルデータ投入 / English: Seed lightweight sample data for manual verification
     today = datetime.date.today()
     messages = []
@@ -105,19 +131,28 @@ def seed_sample_data(db: Session):
         days_behind += 7
     last_friday = today - datetime.timedelta(days=days_behind)
 
-    log = db.exec(select(DayLog).where(DayLog.date == last_friday)).first()
+    log = db.exec(
+        select(DayLog).where(DayLog.date == last_friday, DayLog.guest_id == guest_id)
+    ).first()
     if not log:
         log = DayLog(
-            date=last_friday, content="先週の金曜日はとても良い天気でした。プロジェクトの進捗も順調でした。"
+            guest_id=guest_id,
+            date=last_friday,
+            content="先週の金曜日はとても良い天気でした。プロジェクトの進捗も順調でした。",
         )
         db.add(log)
         messages.append(f"Seeded DayLog for {last_friday}")
 
     routine_name = "Daily Routine"
-    daily_routine = db.exec(select(Routine).where(Routine.name == routine_name)).first()
+    daily_routine = db.exec(
+        select(Routine).where(Routine.name == routine_name, Routine.guest_id == guest_id)
+    ).first()
     if not daily_routine:
         daily_routine = Routine(
-            name=routine_name, days="0,1,2,3,4,5,6", description="General daily habits"
+            guest_id=guest_id,
+            name=routine_name,
+            days="0,1,2,3,4,5,6",
+            description="General daily habits",
         )
         db.add(daily_routine)
         db.flush()
@@ -128,16 +163,26 @@ def seed_sample_data(db: Session):
             ("09:00", "Check Emails", "Browser"),
         ]
         for time_value, name, category in steps_data:
-            step = Step(routine_id=daily_routine.id, name=name, time=time_value, category=category)
+            step = Step(
+                guest_id=guest_id,
+                routine_id=daily_routine.id,
+                name=name,
+                time=time_value,
+                category=category,
+            )
             db.add(step)
         messages.append(f"Seeded Routine '{routine_name}'")
 
     task_name = "Buy Milk"
     # 日本語: 同名同日データがあれば重複作成しない / English: Skip insert when same-day task already exists
     if not db.exec(
-        select(CustomTask).where(CustomTask.date == today, CustomTask.name == task_name)
+        select(CustomTask).where(
+            CustomTask.date == today,
+            CustomTask.name == task_name,
+            CustomTask.guest_id == guest_id,
+        )
     ).first():
-        db.add(CustomTask(date=today, name=task_name, time="18:00", memo="Low fat"))
+        db.add(CustomTask(guest_id=guest_id, date=today, name=task_name, time="18:00", memo="Low fat"))
         messages.append(f"Seeded Task '{task_name}' for Today ({today})")
 
     tomorrow = today + datetime.timedelta(days=1)
@@ -147,19 +192,41 @@ def seed_sample_data(db: Session):
     ]
     for time_value, name, memo in tasks_tomorrow:
         if not db.exec(
-            select(CustomTask).where(CustomTask.date == tomorrow, CustomTask.name == name)
+            select(CustomTask).where(
+                CustomTask.date == tomorrow,
+                CustomTask.name == name,
+                CustomTask.guest_id == guest_id,
+            )
         ).first():
-            db.add(CustomTask(date=tomorrow, name=name, time=time_value, memo=memo))
+            db.add(
+                CustomTask(
+                    guest_id=guest_id,
+                    date=tomorrow,
+                    name=name,
+                    time=time_value,
+                    memo=memo,
+                )
+            )
             messages.append(f"Seeded Task '{name}' for Tomorrow ({tomorrow})")
 
     day_after = today + datetime.timedelta(days=2)
     task_name_da = "Gym"
     if not db.exec(
         select(CustomTask).where(
-            CustomTask.date == day_after, CustomTask.name == task_name_da
+            CustomTask.date == day_after,
+            CustomTask.name == task_name_da,
+            CustomTask.guest_id == guest_id,
         )
     ).first():
-        db.add(CustomTask(date=day_after, name=task_name_da, time="19:00", memo="Leg day"))
+        db.add(
+            CustomTask(
+                guest_id=guest_id,
+                date=day_after,
+                name=task_name_da,
+                time="19:00",
+                memo="Leg day",
+            )
+        )
         messages.append(f"Seeded Task '{task_name_da}' for Day after Tomorrow ({day_after})")
 
     db.commit()

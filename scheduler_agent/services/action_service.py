@@ -132,7 +132,12 @@ def _match_routines_by_name(routines: List[Routine], routine_name: Any) -> tuple
 
     return [], "none"
 
-def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: datetime.date):
+def _apply_actions(
+    db: Session,
+    actions: List[Dict[str, Any]],
+    default_date: datetime.date,
+    guest_id: str = "default",
+):
     # 日本語: LLM からの action 配列を順次検証・実行 / English: Validate and execute LLM-produced actions sequentially
     results = []
     errors = []
@@ -276,7 +281,11 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 time_value = raw_time_value if isinstance(raw_time_value, str) else "00:00"
                 memo = action.get("memo") if isinstance(action.get("memo"), str) else ""
                 new_task = CustomTask(
-                    date=date_value, name=name.strip(), time=time_value.strip(), memo=memo.strip()
+                    guest_id=guest_id,
+                    date=date_value,
+                    name=name.strip(),
+                    time=time_value.strip(),
+                    memo=memo.strip(),
                 )
                 db.add(new_task)
                 db.flush()
@@ -320,7 +329,11 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 cur = start_val
                 while cur <= end_val:
                     new_task = CustomTask(
-                        date=cur, name=name.strip(), time=time_value.strip(), memo=memo.strip()
+                        guest_id=guest_id,
+                        date=cur,
+                        name=name.strip(),
+                        time=time_value.strip(),
+                        memo=memo.strip(),
                     )
                     db.add(new_task)
                     added_dates.append(cur.isoformat())
@@ -342,6 +355,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("delete_custom_task: task_id が不正です。")
                     continue
                 task_obj = db.get(CustomTask, task_id_int)
+                if task_obj and task_obj.guest_id != guest_id:
+                    task_obj = None
                 if not task_obj:
                     errors.append(f"task_id={task_id_int} が見つかりませんでした。")
                     continue
@@ -370,7 +385,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     continue
                 tasks_to_delete = db.exec(
                     select(CustomTask)
-                    .where(CustomTask.date.between(start_val, end_val))
+                    .where(CustomTask.date.between(start_val, end_val), CustomTask.guest_id == guest_id)
                 ).all()
                 count = len(tasks_to_delete)
                 for t in tasks_to_delete:
@@ -396,6 +411,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("toggle_step: step_id が不正です。")
                     continue
                 step_obj = db.get(Step, step_id_int)
+                if step_obj and step_obj.guest_id != guest_id:
+                    step_obj = None
                 if not step_obj:
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
@@ -409,11 +426,11 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 date_value = _parse_date(raw_date_value, default_date)
                 log = db.exec(
                     select(DailyLog).where(
-                        DailyLog.date == date_value, DailyLog.step_id == step_obj.id
+                        DailyLog.date == date_value, DailyLog.step_id == step_obj.id, DailyLog.guest_id == guest_id
                     )
                 ).first()
                 if not log:
-                    log = DailyLog(date=date_value, step_id=step_obj.id)
+                    log = DailyLog(guest_id=guest_id, date=date_value, step_id=step_obj.id)
                     db.add(log)
                 log.done = _bool_from_value(action.get("done"), True)
                 memo = action.get("memo")
@@ -435,6 +452,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("toggle_custom_task: task_id が不正です。")
                     continue
                 task_obj = db.get(CustomTask, task_id_int)
+                if task_obj and task_obj.guest_id != guest_id:
+                    task_obj = None
                 if not task_obj:
                     errors.append(f"task_id={task_id_int} が見つかりませんでした。")
                     continue
@@ -462,6 +481,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_custom_task_time: task_id が不正です。")
                     continue
                 task_obj = db.get(CustomTask, task_id_int)
+                if task_obj and task_obj.guest_id != guest_id:
+                    task_obj = None
                 if not task_obj:
                     errors.append(f"task_id={task_id_int} が見つかりませんでした。")
                     continue
@@ -484,6 +505,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("rename_custom_task: task_id が不正です。")
                     continue
                 task_obj = db.get(CustomTask, task_id_int)
+                if task_obj and task_obj.guest_id != guest_id:
+                    task_obj = None
                 if not task_obj:
                     errors.append(f"task_id={task_id_int} が見つかりませんでした。")
                     continue
@@ -507,6 +530,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_custom_task_memo: task_id が不正です。")
                     continue
                 task_obj = db.get(CustomTask, task_id_int)
+                if task_obj and task_obj.guest_id != guest_id:
+                    task_obj = None
                 if not task_obj:
                     errors.append(f"task_id={task_id_int} が見つかりませんでした。")
                     continue
@@ -530,9 +555,11 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
-                day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
+                day_log = db.exec(
+                    select(DayLog).where(DayLog.date == date_value, DayLog.guest_id == guest_id)
+                ).first()
                 if not day_log:
-                    day_log = DayLog(date=date_value)
+                    day_log = DayLog(guest_id=guest_id, date=date_value)
                     db.add(day_log)
                 day_log.content = content.strip()
                 results.append(f"{date_value} の日報を更新しました。")
@@ -554,9 +581,11 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
-                day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
+                day_log = db.exec(
+                    select(DayLog).where(DayLog.date == date_value, DayLog.guest_id == guest_id)
+                ).first()
                 if not day_log:
-                    day_log = DayLog(date=date_value)
+                    day_log = DayLog(guest_id=guest_id, date=date_value)
                     day_log.content = content.strip()
                     db.add(day_log)
                 else:
@@ -581,7 +610,9 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     )
                     continue
                 date_value = _parse_date(raw_date_value, default_date)
-                day_log = db.exec(select(DayLog).where(DayLog.date == date_value)).first()
+                day_log = db.exec(
+                    select(DayLog).where(DayLog.date == date_value, DayLog.guest_id == guest_id)
+                ).first()
                 if day_log and day_log.content:
                     results.append(f"{date_value} の日報:\n{day_log.content}")
                 else:
@@ -596,7 +627,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     continue
                 days = action.get("days", "0,1,2,3,4")
                 desc = action.get("description", "")
-                routine = Routine(name=name, days=days, description=desc)
+                routine = Routine(guest_id=guest_id, name=name, days=days, description=desc)
                 db.add(routine)
                 db.flush()
                 results.append(f"ルーチン「{name}」(ID: {routine.id}) を追加しました。")
@@ -617,6 +648,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                         errors.append("delete_routine: routine_id が不正です。")
                         continue
                     routine_obj = db.get(Routine, routine_id_int)
+                    if routine_obj and routine_obj.guest_id != guest_id:
+                        routine_obj = None
                     if not routine_obj:
                         errors.append(f"routine_id={routine_id_int} が見つかりませんでした。")
                         continue
@@ -625,7 +658,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     dirty = True
                     continue
 
-                routines = db.exec(select(Routine)).all()
+                routines = db.exec(select(Routine).where(Routine.guest_id == guest_id)).all()
 
                 if delete_all:
                     # 日本語: 全件削除モード / English: Delete-all mode
@@ -689,6 +722,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_routine_days: routine_id が不正です。")
                     continue
                 routine_obj = db.get(Routine, routine_id_int)
+                if routine_obj and routine_obj.guest_id != guest_id:
+                    routine_obj = None
                 if not routine_obj:
                     errors.append(f"routine_id={routine_id_int} が見つかりませんでした。")
                     continue
@@ -704,8 +739,18 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 if not rid or not name:
                     errors.append("add_step: routine_id and name required")
                     continue
+                try:
+                    routine_id_int = int(rid)
+                except (TypeError, ValueError):
+                    errors.append("add_step: routine_id が不正です。")
+                    continue
+                routine_obj = db.get(Routine, routine_id_int)
+                if not routine_obj or routine_obj.guest_id != guest_id:
+                    errors.append(f"routine_id={routine_id_int} が見つかりませんでした。")
+                    continue
                 step = Step(
-                    routine_id=int(rid),
+                    guest_id=guest_id,
+                    routine_id=routine_obj.id,
                     name=name,
                     time=action.get("time", "00:00"),
                     category=action.get("category", "Other"),
@@ -721,6 +766,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 # 日本語: ステップ削除 / English: Delete step by ID
                 sid = action.get("step_id")
                 step = db.get(Step, int(sid)) if sid else None
+                if step and step.guest_id != guest_id:
+                    step = None
                 if step:
                     db.delete(step)
                     results.append(f"ステップ「{step.name}」を削除しました。")
@@ -742,6 +789,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_step_time: step_id が不正です。")
                     continue
                 step_obj = db.get(Step, step_id_int)
+                if step_obj and step_obj.guest_id != guest_id:
+                    step_obj = None
                 if not step_obj:
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
@@ -764,6 +813,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("rename_step: step_id が不正です。")
                     continue
                 step_obj = db.get(Step, step_id_int)
+                if step_obj and step_obj.guest_id != guest_id:
+                    step_obj = None
                 if not step_obj:
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
@@ -787,6 +838,8 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                     errors.append("update_step_memo: step_id が不正です。")
                     continue
                 step_obj = db.get(Step, step_id_int)
+                if step_obj and step_obj.guest_id != guest_id:
+                    step_obj = None
                 if not step_obj:
                     errors.append(f"step_id={step_id_int} が見つかりませんでした。")
                     continue
@@ -817,7 +870,7 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
                 custom_tasks = db.exec(
                     select(CustomTask)
-                    .where(CustomTask.date.between(start_date, end_date))
+                    .where(CustomTask.date.between(start_date, end_date), CustomTask.guest_id == guest_id)
                     .order_by(CustomTask.date, CustomTask.time)
                 ).all()
                 for custom_task in custom_tasks:
@@ -828,12 +881,14 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 current_date = start_date
                 while current_date <= end_date:
                     # 日本語: 日ごとに該当曜日ルーチンを展開 / English: Expand weekday routines date-by-date
-                    routines_for_day = get_weekday_routines(db, current_date.weekday())
+                    routines_for_day = get_weekday_routines(db, current_date.weekday(), guest_id=guest_id)
                     for routine in routines_for_day:
                         for step in routine.steps:
                             log = db.exec(
                                 select(DailyLog).where(
-                                    DailyLog.date == current_date, DailyLog.step_id == step.id
+                                    DailyLog.date == current_date,
+                                    DailyLog.step_id == step.id,
+                                    DailyLog.guest_id == guest_id,
                                 )
                             ).first()
                             status = "完了" if log and log.done else "未完了"
@@ -867,14 +922,16 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
 
                 summary_parts = []
 
-                day_log = db.exec(select(DayLog).where(DayLog.date == target_date)).first()
+                day_log = db.exec(
+                    select(DayLog).where(DayLog.date == target_date, DayLog.guest_id == guest_id)
+                ).first()
                 if day_log and day_log.content:
                     summary_parts.append(f"日報: {day_log.content}")
                 else:
                     summary_parts.append("日報: なし")
 
                 custom_tasks = db.exec(
-                    select(CustomTask).where(CustomTask.date == target_date)
+                    select(CustomTask).where(CustomTask.date == target_date, CustomTask.guest_id == guest_id)
                 ).all()
                 if custom_tasks:
                     summary_parts.append("カスタムタスク:")
@@ -886,14 +943,16 @@ def _apply_actions(db: Session, actions: List[Dict[str, Any]], default_date: dat
                 else:
                     summary_parts.append("カスタムタスク: なし")
 
-                routines_for_day = get_weekday_routines(db, target_date.weekday())
+                routines_for_day = get_weekday_routines(db, target_date.weekday(), guest_id=guest_id)
                 if routines_for_day:
                     summary_parts.append("ルーチンステップ:")
                     for routine in routines_for_day:
                         for step in routine.steps:
                             log = db.exec(
                                 select(DailyLog).where(
-                                    DailyLog.date == target_date, DailyLog.step_id == step.id
+                                    DailyLog.date == target_date,
+                                    DailyLog.step_id == step.id,
+                                    DailyLog.guest_id == guest_id,
                                 )
                             ).first()
                             status = "完了" if log and log.done else "未完了"
