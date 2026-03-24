@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 # 日本語: Multi-Agent-Platform の設定モーダルと揃えるデフォルト / English: Defaults aligned with the platform modal
-DEFAULT_SELECTION = {"provider": "groq", "model": "openai/gpt-oss-20b", "base_url": ""}
+DEFAULT_SELECTION = {"provider": "groq", "model": "openai/gpt-oss-120b", "base_url": ""}
 
 # 日本語: UI 用の表示モデル一覧 / English: Available models for UI
 AVAILABLE_MODELS: List[Dict[str, str]] = [
     # Groq
+    {"provider": "groq", "model": "openai/gpt-oss-120b", "label": "GPT-OSS 120B (Groq)"},
     {"provider": "groq", "model": "openai/gpt-oss-20b", "label": "GPT-OSS 20B (Groq)"},
 
     # OpenAI
@@ -75,21 +76,12 @@ def _coerce_selection(raw: Dict[str, str] | None) -> Dict[str, str | None]:
     # 日本語: selection を安全に正規化 / English: Normalize selection fields safely
     """Normalise provider/model/base_url fields and fall back to defaults."""
 
-    provider = DEFAULT_SELECTION["provider"]
-    model = DEFAULT_SELECTION["model"]
+    # 日本語: 強制的に gpt-oss-120b を使用するように固定 / English: Force gpt-oss-120b
+    provider = "groq"
+    model = "openai/gpt-oss-120b"
     base_url: str | None = None
 
-    if isinstance(raw, dict):
-        raw_provider = raw.get("provider")
-        raw_model = raw.get("model")
-        raw_base_url = raw.get("base_url")
-        if isinstance(raw_provider, str) and raw_provider.strip():
-            provider = raw_provider.strip()
-        if isinstance(raw_model, str) and raw_model.strip():
-            model = raw_model.strip()
-        if isinstance(raw_base_url, str) and raw_base_url.strip():
-            base_url = raw_base_url.strip()
-
+    # 日本語: 他の選択を無視して常に 120b を返す / English: Return 120b regardless of raw input
     return {"provider": provider, "model": model, "base_url": base_url}
 
 

@@ -35,6 +35,7 @@ services:
 networks:
   multi_agent_network:
     name: ${MULTI_AGENT_NETWORK:-multi_agent_platform_net}
+    external: true
 
 volumes:
   postgres_data:
