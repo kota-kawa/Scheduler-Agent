@@ -15,7 +15,12 @@ except ImportError:
     Anthropic = None
 
 from model_selection import PROVIDER_DEFAULTS, apply_model_selection
+from scheduler_agent.core.config import get_max_output_tokens
 from scheduler_tools import REVIEW_DECISION_TOOL_NAME, REVIEW_TOOLS, SCHEDULER_TOOLS
+from scheduler_agent.services.usage_limit_service import (
+    MonthlyLlmRequestLimitExceeded,
+    reserve_monthly_llm_request_or_raise,
+)
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -126,6 +131,7 @@ def run_prompt_guard(user_input: str) -> Dict[str, Any]:
         "category": None,
         "rationale": None,
         "error": None,
+        "limit_exceeded": False,
         "raw": None,
     }
 
@@ -139,6 +145,14 @@ def run_prompt_guard(user_input: str) -> Dict[str, Any]:
         result["error"] = "Prompt guard API key is not configured."
         return result
 
+    max_output_tokens = get_max_output_tokens()
+    try:
+        reserve_monthly_llm_request_or_raise()
+    except MonthlyLlmRequestLimitExceeded as exc:
+        result["error"] = str(exc)
+        result["limit_exceeded"] = True
+        return result
+
     client = OpenAI(api_key=PROMPT_GUARD_API_KEY, base_url=PROMPT_GUARD_BASE_URL)
     try:
         response = client.chat.completions.create(
@@ -148,7 +162,7 @@ def run_prompt_guard(user_input: str) -> Dict[str, Any]:
                 {"role": "user", "content": str(user_input)},
             ],
             temperature=0,
-            max_tokens=256,
+            max_tokens=max_output_tokens,
         )
     except Exception as exc:
         result["error"] = f"Prompt guard request failed: {exc}"
@@ -379,6 +393,8 @@ class UnifiedClient:
 
     def create(self, **kwargs):
         # 日本語: OpenAI互換 / Claude の呼び出しラッパー / English: Unified create wrapper
+        reserve_monthly_llm_request_or_raise()
+
         if self.provider == "claude":
             return self._create_anthropic(**kwargs)
 
@@ -472,7 +488,10 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
     """Call the selected LLM with structured tool definitions and return reply/actions."""
 
     user_input = _get_last_user_message(messages)
+    max_output_tokens = get_max_output_tokens()
     guard_result = run_prompt_guard(user_input)
+    if guard_result.get("limit_exceeded"):
+        return str(guard_result.get("error") or "今月のLLM API利用上限に達したため実行できません。"), []
     if guard_result.get("error"):
         if PROMPT_GUARD_FAIL_OPEN:
             print(f"Prompt guard error (fail-open): {guard_result['error']}")
@@ -615,13 +634,14 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
                 system_text, claude_messages = _claude_messages_from_openai(prompt_messages)
                 
                 anthropic_tools = [_openai_tool_to_anthropic(t) for t in SCHEDULER_TOOLS]
-                
+
+                reserve_monthly_llm_request_or_raise()
                 response = client.client.messages.create(
                     model=client.model_name,
                     system=system_text,
                     messages=claude_messages,
                     temperature=0.4,
-                    max_tokens=1500,
+                    max_tokens=max_output_tokens,
                     tools=anthropic_tools,
                     tool_choice={"type": "auto"},
                 )
@@ -632,7 +652,7 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
                 model=client.model_name,
                 messages=prompt_messages,
                 temperature=0.4,
-                max_tokens=1500,
+                max_tokens=max_output_tokens,
                 tools=SCHEDULER_TOOLS,
                 tool_choice="auto",
             )
@@ -643,6 +663,8 @@ def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[st
 
             return reply, actions
 
+        except MonthlyLlmRequestLimitExceeded as e:
+            return str(e), []
         except Exception as e:
             last_exception = e
             err_str = str(e)

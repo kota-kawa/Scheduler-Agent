@@ -192,6 +192,17 @@ def test_chat_endpoint_rejects_last_non_user_message(app_module):
     assert response.json()["detail"] == "last message must be from user"
 
 
+def test_chat_endpoint_rejects_oversized_input_message(app_module, monkeypatch):
+    monkeypatch.setattr(app_module.web_handlers, "get_max_input_chars", lambda: 5)
+    payload = {"messages": [{"role": "user", "content": "123456"}]}
+
+    with _client_with_db(app_module, _FakeDb()) as client:
+        response = client.post("/api/chat", json=payload)
+
+    assert response.status_code == 400
+    assert "input exceeds max length" in response.json()["detail"]
+
+
 def test_chat_endpoint_passes_only_recent_ten_messages(app_module, monkeypatch):
     captured = {}
 

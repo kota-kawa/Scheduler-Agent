@@ -9,7 +9,11 @@ from typing import Any, Callable, Dict, List
 
 from llm_client import UnifiedClient, _content_to_text
 
-from scheduler_agent.core.config import EXEC_TRACE_MARKER_PREFIX, EXEC_TRACE_MARKER_SUFFIX
+from scheduler_agent.core.config import (
+    EXEC_TRACE_MARKER_PREFIX,
+    EXEC_TRACE_MARKER_SUFFIX,
+    get_max_output_tokens,
+)
 
 
 def _remove_no_schedule_lines(text: str) -> str:
@@ -229,7 +233,7 @@ def _build_final_reply(
             model=summary_client.model_name,
             messages=summary_messages,
             temperature=0.7,
-            max_tokens=1000,
+            max_tokens=get_max_output_tokens(),
         )
         final_reply = content_to_text_fn(resp.choices[0].message.content)
         if _looks_mechanical_reply(final_reply):

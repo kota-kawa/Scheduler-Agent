@@ -83,6 +83,12 @@ GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...
 # Prompt guard (recommended)
 GROQ_API_KEY=gsk_...
+# Monthly outbound LLM request cap (optional, default: 1000)
+SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT=1000
+# Max input length per user message (optional, default: 10000 chars)
+SCHEDULER_MAX_INPUT_CHARS=10000
+# Max output tokens per LLM call (optional, default: 5000)
+SCHEDULER_MAX_OUTPUT_TOKENS=5000
 ```
 
 ### 2) Start the app
@@ -246,6 +252,12 @@ GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...
 # プロンプトガード（推奨）
 GROQ_API_KEY=gsk_...
+# 月次LLM APIリクエスト上限（任意、未設定時は1000）
+SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT=1000
+# 1メッセージあたり入力文字数上限（任意、未設定時は10000）
+SCHEDULER_MAX_INPUT_CHARS=10000
+# 1回のLLM呼び出しあたり出力トークン上限（任意、未設定時は5000）
+SCHEDULER_MAX_OUTPUT_TOKENS=5000
 ```
 
 ### 2) 起動

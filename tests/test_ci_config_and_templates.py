@@ -55,6 +55,48 @@ def test_get_max_same_read_action_streak_clamps_values(monkeypatch):
     assert core_config.get_max_same_read_action_streak() == 10
 
 
+def test_get_monthly_llm_request_limit_defaults_and_clamps(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT", raising=False)
+    assert core_config.get_monthly_llm_request_limit() == 1000
+
+    monkeypatch.setenv("SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT", "2500")
+    assert core_config.get_monthly_llm_request_limit() == 2500
+
+    monkeypatch.setenv("SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT", "0")
+    assert core_config.get_monthly_llm_request_limit() == 1
+
+    monkeypatch.setenv("SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT", "abc")
+    assert core_config.get_monthly_llm_request_limit() == 1000
+
+
+def test_get_max_input_chars_defaults_and_clamps(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_MAX_INPUT_CHARS", raising=False)
+    assert core_config.get_max_input_chars() == 10000
+
+    monkeypatch.setenv("SCHEDULER_MAX_INPUT_CHARS", "12000")
+    assert core_config.get_max_input_chars() == 12000
+
+    monkeypatch.setenv("SCHEDULER_MAX_INPUT_CHARS", "0")
+    assert core_config.get_max_input_chars() == 1
+
+    monkeypatch.setenv("SCHEDULER_MAX_INPUT_CHARS", "bad")
+    assert core_config.get_max_input_chars() == 10000
+
+
+def test_get_max_output_tokens_defaults_and_clamps(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_MAX_OUTPUT_TOKENS", raising=False)
+    assert core_config.get_max_output_tokens() == 5000
+
+    monkeypatch.setenv("SCHEDULER_MAX_OUTPUT_TOKENS", "7000")
+    assert core_config.get_max_output_tokens() == 7000
+
+    monkeypatch.setenv("SCHEDULER_MAX_OUTPUT_TOKENS", "0")
+    assert core_config.get_max_output_tokens() == 1
+
+    monkeypatch.setenv("SCHEDULER_MAX_OUTPUT_TOKENS", "oops")
+    assert core_config.get_max_output_tokens() == 5000
+
+
 def test_flash_and_pop_round_trip():
     request = _build_request()
 

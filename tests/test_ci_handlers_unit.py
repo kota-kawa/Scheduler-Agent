@@ -163,6 +163,23 @@ def test_chat_rejects_last_non_user_message():
     assert exc_info.value.detail == "last message must be from user"
 
 
+def test_chat_rejects_when_last_user_message_exceeds_input_limit(monkeypatch):
+    monkeypatch.setattr(web_handlers, "get_max_input_chars", lambda: 5)
+    payload = {"messages": [{"role": "user", "content": "123456"}]}
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            web_handlers.chat(
+                _FakeRequest(payload=payload),
+                _FakeDb(),
+                process_chat_request_fn=lambda *_args, **_kwargs: {},
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "input exceeds max length" in exc_info.value.detail
+
+
 def test_chat_passes_only_recent_ten_messages():
     captured = {}
 

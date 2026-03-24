@@ -99,3 +99,66 @@ def test_claude_messages_from_openai_splits_system_prompt():
         {"role": "user", "content": [{"type": "text", "text": "hello"}]},
         {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
     ]
+
+
+def test_call_scheduler_llm_returns_limit_message_when_quota_exceeded(monkeypatch):
+    monkeypatch.setattr(
+        llm_client,
+        "run_prompt_guard",
+        lambda _user_input: {
+            "blocked": False,
+            "category": None,
+            "rationale": None,
+            "error": "今月のLLM API利用上限（1000回）に達しました。",
+            "limit_exceeded": True,
+            "raw": None,
+        },
+    )
+
+    reply, actions = llm_client.call_scheduler_llm(
+        [{"role": "user", "content": "明日の予定を教えて"}],
+        "context",
+    )
+
+    assert "上限" in reply
+    assert actions == []
+
+
+def test_call_scheduler_llm_uses_configured_output_token_limit(monkeypatch):
+    monkeypatch.setattr(llm_client, "run_prompt_guard", lambda _user_input: {"blocked": False})
+    monkeypatch.setattr(llm_client, "get_max_output_tokens", lambda: 5000)
+    monkeypatch.setattr(llm_client, "SCHEDULER_TOOLS", [])
+
+    captured: dict = {}
+
+    class _DummyCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="ok", tool_calls=[]),
+                    )
+                ]
+            )
+
+    class _DummyChat:
+        def __init__(self):
+            self.completions = _DummyCompletions()
+
+    class _DummyUnifiedClient:
+        def __init__(self):
+            self.provider = "openai"
+            self.model_name = "dummy-model"
+            self.chat = _DummyChat()
+
+    monkeypatch.setattr(llm_client, "UnifiedClient", _DummyUnifiedClient)
+
+    reply, actions = llm_client.call_scheduler_llm(
+        [{"role": "user", "content": "テスト"}],
+        "context",
+    )
+
+    assert reply == "ok"
+    assert actions == []
+    assert captured["max_tokens"] == 5000

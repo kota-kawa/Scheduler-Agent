@@ -13,6 +13,7 @@ from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 
 from model_selection import apply_model_selection, current_available_models, update_override
+from scheduler_agent.core.config import get_max_input_chars
 from scheduler_agent.models import (
     ChatHistory,
     CustomTask,
@@ -551,6 +552,14 @@ async def chat(request: Request, db: Session, *, process_chat_request_fn):
 
     if not formatted_messages or formatted_messages[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="last message must be from user")
+
+    max_input_chars = get_max_input_chars()
+    last_user_content = formatted_messages[-1]["content"]
+    if len(last_user_content) > max_input_chars:
+        raise HTTPException(
+            status_code=400,
+            detail=f"input exceeds max length ({max_input_chars} characters)",
+        )
 
     recent_messages = formatted_messages[-10:]
 

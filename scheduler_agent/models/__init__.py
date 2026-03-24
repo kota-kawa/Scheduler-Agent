@@ -1,6 +1,6 @@
 """SQLModel exports for Scheduler Agent."""
 
-from .chat_models import ChatHistory, EvaluationResult
+from .chat_models import ChatHistory, EvaluationResult, LlmMonthlyUsage
 from .scheduler_models import CustomTask, DailyLog, DayLog, Routine, Step
 
 __all__ = [
@@ -11,4 +11,5 @@ __all__ = [
     "DayLog",
     "ChatHistory",
     "EvaluationResult",
+    "LlmMonthlyUsage",
 ]

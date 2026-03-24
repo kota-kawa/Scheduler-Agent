@@ -49,3 +49,36 @@ def get_max_same_read_action_streak() -> int:
     except (TypeError, ValueError):
         parsed = 10
     return max(1, min(parsed, 10))
+
+
+def get_monthly_llm_request_limit() -> int:
+    """Maximum outbound LLM API requests allowed per calendar month."""
+    # 日本語: 月次LLMリクエスト上限（未設定時は1000） / English: Monthly LLM request cap (default 1000 when unset)
+    raw_value = os.getenv("SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT", "1000")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 1000
+    return max(1, parsed)
+
+
+def get_max_input_chars() -> int:
+    """Maximum accepted user input length in characters."""
+    # 日本語: ユーザー入力文字数上限（未設定時は10000） / English: User input character cap (default 10000 when unset)
+    raw_value = os.getenv("SCHEDULER_MAX_INPUT_CHARS", "10000")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 10000
+    return max(1, parsed)
+
+
+def get_max_output_tokens() -> int:
+    """Maximum output tokens per LLM completion call."""
+    # 日本語: 1リクエストあたりの出力トークン上限（未設定時は5000） / English: Per-request output token cap (default 5000 when unset)
+    raw_value = os.getenv("SCHEDULER_MAX_OUTPUT_TOKENS", "5000")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        parsed = 5000
+    return max(1, parsed)
