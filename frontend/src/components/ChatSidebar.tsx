@@ -369,7 +369,8 @@ export const ChatSidebar = ({ onRefresh, onModelChange }: ChatSidebarProps) => {
             },
             selectOptions.map((m) => {
               const value = `${m.provider}:${m.model}`;
-              return h("option", { key: value, value }, m.label || value);
+              const isSelectable = value === "groq:openai/gpt-oss-120b";
+              return h("option", { key: value, value, disabled: !isSelectable }, m.label || value);
             })
           )
         )
