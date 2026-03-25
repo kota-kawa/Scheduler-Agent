@@ -162,3 +162,24 @@ def test_call_scheduler_llm_uses_configured_output_token_limit(monkeypatch):
     assert reply == "ok"
     assert actions == []
     assert captured["max_tokens"] == 5000
+
+
+def test_sanitize_text_blocks_multiple_function_marker_variants():
+    samples = [
+        "<function=create_custom_task>{\"name\":\"x\"}</function>",
+        "[function=create_custom_task]{\"name\":\"x\"}",
+        "{{function create_custom_task}}",
+        "{function create_custom_task}",
+    ]
+
+    for sample in samples:
+        sanitized = llm_client._sanitize_text(sample)
+        assert "function" in sanitized.lower()
+        assert "<function" not in sanitized.lower()
+        assert "[function" not in sanitized.lower()
+        assert "{{function" not in sanitized.lower()
+        assert "{function" not in sanitized.lower()
+
+
+def test_sanitize_text_preserves_non_string_input_by_stringifying():
+    assert llm_client._sanitize_text(123) == "123"

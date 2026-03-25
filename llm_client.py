@@ -482,15 +482,18 @@ def _current_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+_FUNCTION_MARKER_PATTERN = re.compile(
+    r"(?i)<\s*/?\s*function\b|\[\s*function\b|\{\{\s*function\b|\{\s*function\b"
+)
+
+
 def _sanitize_text(text: str) -> str:
     # 日本語: モデル誤解釈を避けるためのテキスト洗浄 / English: Sanitize text to avoid tool syntax confusion
-    """Remove patterns that might confuse the model, like Gemini's function call syntax."""
+    """Neutralize function-like markers that may trigger tool-call misinterpretation."""
     if not isinstance(text, str):
         return str(text)
-    # Remove <function=...> tags and content if possible, or just break the tag
-    # The error showed <function=create_custom_task>{...
-    # We'll just replace <function= with (function= to break the syntax detection
-    return re.sub(r"<function=", "(function=", text)
+    # 日本語: XML/角括弧/テンプレート風の function マーカーを無害化 / English: Neutralize XML, bracket and template-style function markers
+    return _FUNCTION_MARKER_PATTERN.sub("(function", text)
 
 
 def call_scheduler_llm(messages: List[Dict[str, str]], context: str) -> Tuple[str, List[Dict[str, Any]]]:
