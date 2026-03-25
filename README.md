@@ -74,24 +74,55 @@ flowchart LR
 The Scheduler Agent manages tasks, routines, memos, and date-dependent operations through natural-language interaction and tool calling.
 
 **Evaluation Protocol**
-I evaluated 10 task-management scenarios, including:
-- task creation
-- update / deletion
-- routine editing
-- compound instructions
-- relative-date interpretation
+Ten task-management scenarios were evaluated. Each task was tested three times and scored as:
+- **○**: All 3 attempts succeeded
+- **△**: 1–2 attempts succeeded
+- **×**: All 3 attempts failed
 
-Each task was tested three times and scored as:
-- **○**: 3/3 success
-- **△**: 1–2/3 success
-- **×**: 0/3 success
+The 10 evaluation tasks:
 
-**Result**
-Among the tested models, **Qwen3 32B solved all tasks correctly**, showing particularly strong suitability for structured scheduler operations.
-In contrast, even stronger frontier models were not always robust: for example, **GPT-5.1 failed on relative-date calculation**, and **Claude Haiku 4.5 often failed to trigger tool calls at all**.
+| # | Task |
+|---|------|
+| 1 | Add a task called "Buy detergent" |
+| 2 | Show my schedule from tomorrow through the day after tomorrow |
+| 3 | Rename "Buy detergent" to "Buy fabric softener" |
+| 4 | Mark "Buy fabric softener" as complete |
+| 5 | Schedule a "Dentist" appointment starting at 15:30 tomorrow |
+| 6 | Delete "Buy fabric softener", and add a note "Don't forget insurance card" to the "Dentist" task |
+| 7 | Create a new routine called "Workout" — I'll do it on Mondays and Thursdays |
+| 8 | Add a step "Squats" (10 min) to the "Workout" routine just created |
+| 9 | Also do the "Workout" routine on Saturdays |
+| 10 | Show me last Friday's daily log |
 
-**Why this matters**
-This result highlights an important systems insight: **for structured tool-use tasks, model suitability is not determined by general model prestige alone**.
+**Results**
+
+| Task | GPT-5.1 | Gemini 3 Pro | Claude Opus 4.5 | Claude Haiku 4.5 | Llama 3.3 70B | Qwen3 32B | Gemini 2.5 Flash Lite | Llama 3.1 8B | GPT-OSS 20B |
+|:----:|:-------:|:------------:|:---------------:|:----------------:|:-------------:|:---------:|:---------------------:|:------------:|:-----------:|
+| 1  | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ | ○ |
+| 2  | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ | ○ |
+| 3  | ○ | ○ | ○ | ○ | ○ | ○ | × | △ | ○ |
+| 4  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | ○ |
+| 5  | ○ | ○ | ○ | ○ | ○ | ○ | × | △ | ○ |
+| 6  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | × |
+| 7  | ○ | ○ | ○ | × | ○ | ○ | △ | ○ | ○ |
+| 8  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | ○ |
+| 9  | ○ | ○ | ○ | × | × | ○ | × | △ | ○ |
+| 10 | × | ○ | ○ | ○ | × | ○ | △ | × | × |
+
+**Failure Analysis**
+
+| Model | Main Failure Cause |
+|-------|--------------------|
+| **GPT-5.1** | Date calculation error on task 10: evaluated on Tuesday Dec 9 2025, it identified "last Friday" as Nov 28 instead of Dec 5. Day-of-week recognition was correct, but cross-week arithmetic was off. |
+| **Claude Haiku 4.5** | Tasks 4, 6, 7, 8, 9 — no tool calls were made at all; the model responded with plain text only (No tool calls). |
+| **Llama 3.3 70B** | Task 9: wrote Sunday instead of Saturday. Task 10: date off by one day (Dec 6 instead of Dec 5). |
+| **Gemini 2.5 Flash Lite** | Widespread failures across most tasks. Likely over-applied the system-prompt rule "no JSON in user-facing responses" to tool-call JSON generation as well, treating tool invocation as a prohibited action. |
+| **Llama 3.1 8B** | Tasks 3 and 5: garbled Japanese strings appeared in generated arguments (e.g., "演溪角を起ん"), likely due to tokenizer or training-data coverage gaps for Japanese. Task 10: date calculation error. |
+| **GPT-OSS 20B** | Task 6: only executed the deletion, ignoring the "add a note" instruction. Task 10: large date calculation error (referenced Dec 2). |
+| **Qwen3 32B** | **No failures.** Despite being a "standard-tier" model, it answered all 10 tasks correctly, showing strong suitability for structured scheduler operations. |
+
+**Key Takeaway**
+For structured tool-use tasks like this scheduler, **model suitability is not determined by general model prestige alone**. A mid-tier model (Qwen3 32B) outperformed several frontier models by reliably translating natural-language instructions into correct tool calls.
 
 ---
 
@@ -314,24 +345,56 @@ flowchart LR
 Scheduler Agent は、自然言語の対話とツール呼び出しを通じて、タスク・ルーティン・メモ・日付依存の操作を管理します。
 
 **評価プロトコル**
-以下を含む10件のタスク管理シナリオを評価しました。
-- タスクの作成
-- 更新・削除
-- ルーティンの編集
-- 複合指示
-- 相対日付の解釈
+10件のタスク管理シナリオを評価しました。各タスクは3回試行し、以下の基準でスコアリングしました。
 
-各タスクは3回テストし、以下の基準でスコアリングしました。
-- **○**: 3/3 成功
-- **△**: 1〜2/3 成功
-- **×**: 0/3 成功
+- **○**: 3回全て成功
+- **△**: 1〜2回成功
+- **×**: 全て失敗
 
-**結果**
-テストしたモデルの中で、**Qwen3 32B はすべてのタスクを正解**し、構造化されたスケジューラー操作への適性が特に高いことが示されました。
-一方、より高性能とされるフロンティアモデルでも安定性に課題がありました。例えば、**GPT-5.1 は相対日付の計算に失敗**し、**Claude Haiku 4.5 はツール呼び出し自体を行わないケースが多く**見られました。
+評価タスク一覧:
+
+| # | タスク内容 |
+|---|-----------|
+| 1 | 「洗剤を買う」というタスクを追加して |
+| 2 | 明日から明後日までの予定を教えて |
+| 3 | 「洗剤を買う」を「柔軟剤を買う」に名前を変えて |
+| 4 | 「柔軟剤を買う」タスク，完了した |
+| 5 | 明日の15:30分から「歯医者」の予定を入れて |
+| 6 | 「柔軟剤を買う」は削除して，「歯医者」のタスクに「保険証を忘れない」というメモを追加して |
+| 7 | 「筋トレ」という新しいルーティンを作って．月曜と木曜にやるよ |
+| 8 | さっき作った「筋トレ」ルーティンに，「スクワット」というステップ（10分）を追加して |
+| 9 | 「筋トレ」ルーティン，土曜日もやることにする |
+| 10 | 先週の金曜日の日報を見せて |
+
+**評価結果**
+
+| タスク | GPT-5.1 | Gemini 3 Pro | Claude Opus 4.5 | Claude Haiku 4.5 | Llama 3.3 70B | Qwen3 32B | Gemini 2.5 Flash Lite | Llama 3.1 8B | GPT-OSS 20B |
+|:------:|:-------:|:------------:|:---------------:|:----------------:|:-------------:|:---------:|:---------------------:|:------------:|:-----------:|
+| 1  | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ | ○ |
+| 2  | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ | ○ |
+| 3  | ○ | ○ | ○ | ○ | ○ | ○ | × | △ | ○ |
+| 4  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | ○ |
+| 5  | ○ | ○ | ○ | ○ | ○ | ○ | × | △ | ○ |
+| 6  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | × |
+| 7  | ○ | ○ | ○ | × | ○ | ○ | △ | ○ | ○ |
+| 8  | ○ | ○ | ○ | × | ○ | ○ | × | ○ | ○ |
+| 9  | ○ | ○ | ○ | × | × | ○ | × | △ | ○ |
+| 10 | × | ○ | ○ | ○ | × | ○ | △ | × | × |
+
+**各モデルの主な失敗要因**
+
+| モデル | 主な失敗要因 |
+|--------|------------|
+| **GPT-5.1** | タスク10で日付計算ミス。検証日（2025年12月9日・火曜日）に対し，「先週の金曜日」を11月28日と誤認（正解は12月5日）。曜日の認識は正しいが，週を跨ぐ計算で誤りが生じた。 |
+| **Claude Haiku 4.5** | タスク4, 6, 7, 8, 9でツール呼び出し（JSON生成）が行われず，テキスト応答のみとなるケースが多発した（No tool calls）。 |
+| **Llama 3.3 70B** | タスク9で曜日指定を誤り（土曜→日曜），タスク10では日付を1日ずれて計算（12月6日）。 |
+| **Gemini 2.5 Flash Lite** | 全体的にツール呼び出しのためのJSON生成ができず失敗が多かった。システムプロンプトの「ユーザー向け応答でのJSON出力禁止」という制約を，ツール呼び出しにおけるJSON生成にまで拡大解釈したと考えられる。 |
+| **Llama 3.1 8B** | タスク3・5で日本語引数に意味不明な文字列（「演溪角を起ん」等）が混入。トークナイザまたは学習データの日本語カバレッジの問題と考えられる。タスク10でも日付計算ミス。 |
+| **GPT-OSS 20B** | タスク6で複合指示（削除＋メモ追加）の片方（削除のみ）しか実行しない傾向。タスク10では大幅に日付を誤った（12月2日を参照）。 |
+| **Qwen3 32B** | **失敗なし。** 「普通」クラスのモデルでありながら全タスクに正解し，スケジューラー操作への高い適性を示した。 |
 
 **この結果が示すこと**
-この結果は、システム設計上の重要な知見を示しています。**構造化されたツール利用タスクにおいて、モデルの適性は一般的な知名度だけでは決まらない**ということです。
+**構造化されたツール利用タスクにおいて，モデルの適性は一般的な知名度だけでは決まらない**という重要な知見を示しています。Qwen3 32B は標準的なモデルでありながら，複数のフロンティアモデルを上回る安定性を見せました。
 
 ---
 
