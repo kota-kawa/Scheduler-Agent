@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from sqlmodel import Session, select
 
+from scheduler_tools import SCHEDULER_TOOLS
 from scheduler_agent.models import CustomTask, DailyLog, DayLog, Routine, Step
 from scheduler_agent.services.schedule_parser_service import (
     _bool_from_value,
@@ -43,6 +44,27 @@ READ_ONLY_ACTION_TYPES = _CALC_ACTION_TYPES | {
     "list_tasks_in_period",
     "get_daily_summary",
 }
+
+
+def _extract_allowed_action_types(tools: List[Dict[str, Any]]) -> set[str]:
+    # 日本語: ツール定義から実行許可アクション名を抽出 / English: Extract executable action names from tool definitions
+    allowed: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict) or tool.get("type") != "function":
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str):
+            continue
+        normalized = name.strip()
+        if normalized:
+            allowed.add(normalized)
+    return allowed
+
+
+_ALLOWED_ACTION_TYPES = frozenset(_extract_allowed_action_types(SCHEDULER_TOOLS))
 
 
 # 日本語: 「全件削除」判定に使う語彙セット / English: Tokens interpreted as delete-all routine intent
@@ -151,7 +173,14 @@ def _apply_actions(
         for action in actions:
             if not isinstance(action, dict):
                 continue
-            action_type = action.get("type")
+            raw_action_type = action.get("type")
+            if not isinstance(raw_action_type, str) or not raw_action_type.strip():
+                errors.append("アクション type が不正です。")
+                continue
+            action_type = raw_action_type.strip()
+            if action_type not in _ALLOWED_ACTION_TYPES:
+                errors.append(f"未知のアクション: {action_type}")
+                continue
 
             # ---------- 原子的計算ツール ----------
             # English: Atomic calc tools (no DB write)
