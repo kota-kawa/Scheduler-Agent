@@ -1,5 +1,3 @@
-> 📝 一番下に日本語版もあります。
-
 # Scheduler Agent 📅
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
@@ -14,6 +12,7 @@
 ![Anthropic](https://img.shields.io/badge/Anthropic-Claude-D97706?logo=anthropic&logoColor=white)
 ![Google Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?logo=google&logoColor=white)
 ![Groq](https://img.shields.io/badge/Groq-API-F55036?logoColor=white)
+![CI](https://github.com/kota-kawa/Scheduler-Agent/actions/workflows/tests.yml/badge.svg)
 
 <img src="static/Scheduler-Agent-Logo.png" alt="Scheduler Agent Logo" width="800">
 
@@ -33,11 +32,26 @@ Click a thumbnail to open the video on YouTube.
 
 ## Overview
 
-Scheduler Agent is an AI-powered scheduling assistant that helps manage recurring routines, one-off tasks, and daily logs through a conversational chat interface backed by multiple LLM providers. Use the chat to add and modify tasks, toggle completion, and query your schedule; the UI lets you view and edit routines and logs.
+**Scheduler Agent** is an AI-powered scheduling assistant that manages recurring routines, one-off tasks, and daily logs through a conversational chat interface. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized. Multiple LLM providers are supported, and the UI lets you view and edit routines and logs directly.
 
-## Welcome
+## 🎯 What This Project Demonstrates
 
-**Scheduler Agent** is an AI-powered scheduling assistant that helps you manage routines and one-off tasks through a simple chat experience. Ask things like “What’s on my calendar tomorrow?” or “Add groceries next Tuesday,” and the assistant keeps your timeline organized.
+- **Full-stack development**: Async FastAPI backend + React/TypeScript SPA + PostgreSQL, all wired together end-to-end
+- **LLM integration**: Multi-provider routing with a clean abstraction layer (OpenAI / Anthropic / Gemini / Groq) to avoid vendor lock-in
+- **Reliability engineering**: Deterministic tool execution for date/weekday arithmetic, preventing hallucinations at a design level rather than relying solely on prompt tuning
+- **Production readiness**: CI/CD pipeline (GitHub Actions), schema migrations (Alembic), rate limiting, input sanitization, and prompt injection defense
+- **Security awareness**: Trusted-host enforcement, signed-cookie sessions, HTTPS-only flag, per-user request caps, and guest data TTL cleanup
+- **Empirical evaluation**: Benchmark-driven model comparison across 9 LLM providers with structured failure analysis
+
+## ✨ Features
+
+- Conversational task management — add, edit, delete, and complete tasks via natural language
+- Recurring routine builder with named steps and per-step durations
+- Multi-LLM backend — switch models per request at runtime
+- Daily log viewer queryable by date (“Show me last Friday’s log”)
+- Prompt injection defense and input length/output token caps
+- Guest session support with automatic TTL-based data cleanup
+- One-command Docker Compose deploy
 
 ## 🏗️ Architecture
 
@@ -236,7 +250,7 @@ alembic upgrade head
 
 ---
 
-## ✅ Testing and CI
+## ✅ Testing, CI/CD
 
 ### Local test run
 Use the same Python version as CI (3.12+) and install dependencies.
@@ -268,13 +282,27 @@ pytest -q \
   tests/test_ci_postgres_smoke.py
 ```
 
-### CI behavior
+### CI/CD behavior
 - `.github/workflows/syntax-check.yml` runs Python and TypeScript syntax checks.
 - `.github/workflows/tests.yml` runs:
   - fast tests (`test_architecture_imports`, `test_ci_smoke`)
   - PostgreSQL-backed smoke tests (`test_ci_postgres_smoke`)
   - coverage report generation (`reports/coverage.xml`)
   - skipped-test detection (CI fails if any test is skipped in integration job)
+  - deploy on `main` push only (via SSH + `docker compose up -d --build`)
+
+### CD secrets (GitHub Actions)
+Set these repository secrets before enabling production deploy:
+- `SERVER_HOST` (required): target server hostname/IP
+- `SERVER_USER` (required): SSH user for deployment
+- `SERVER_SSH_KEY` (required): private key used by GitHub Actions
+- `SERVER_PORT` (optional): SSH port (default: `22`)
+- `DEPLOY_PATH` (optional): absolute path of the git checkout on server (fallbacks: `DEPLAY_PATH` typo-compatible, then `/var/www/scheduler-agent`)
+
+Server-side prerequisites for deploy job:
+- `${DEPLOY_PATH}` is already a valid git clone of this repository
+- `secrets.env` exists under `${DEPLOY_PATH}`
+- Docker/Compose are installed and usable by `SERVER_USER`
 
 ---
 
@@ -305,10 +333,26 @@ This project is released under the [MIT License](LICENSE.md).
 
 ## 概要
 
-Scheduler Agent は、会話型チャットインターフェースを通じてルーティンや単発タスク、日次ログを管理するためのAIアシスタントです。チャットでタスクを追加・編集したり、完了を切り替えたり、予定を確認でき、UIでルーティンやログを閲覧・編集できます。
+**Scheduler Agent** は、会話型チャットを通じてルーティン・単発タスク・日次ログを管理するAIスケジュールアシスタントです。「明日の予定は？」「来週火曜に買い物を追加して」と話しかけるだけでタイムラインを整理でき、UIでルーティンやログを直接閲覧・編集することもできます。複数のLLMプロバイダに対応しています。
 
-**Scheduler Agent** は、チャットで予定やタスクを管理できるAIスケジュールアシスタントです。
-「明日の予定は？」「来週火曜に買い物を追加して」など、話しかけるだけでタイムラインを整理できます。
+## 🎯 このプロジェクトで示していること
+
+- **フルスタック開発**: 非同期 FastAPI バックエンド + React/TypeScript SPA + PostgreSQL をエンドツーエンドで構築
+- **LLM統合**: OpenAI / Anthropic / Gemini / Groq をクリーンな抽象化レイヤーでルーティングし、ベンダーロックインを回避
+- **信頼性設計**: 日付・曜日計算を決定的なツール実行に切り出し、プロンプト調整に頼らない設計レベルでのハルシネーション対策
+- **プロダクション対応**: CI/CD（GitHub Actions）・スキーママイグレーション（Alembic）・レートリミット・入力サニタイズ・プロンプトインジェクション対策
+- **セキュリティ意識**: 信頼ホスト検証・署名付き Cookie セッション・HTTPS 強制・ユーザーごとのリクエスト上限・ゲストデータ TTL 自動削除
+- **実験的評価**: 9つのLLMプロバイダを構造化ベンチマークで比較し、失敗要因を分析
+
+## ✨ 機能一覧
+
+- 自然言語によるタスク管理（追加・編集・削除・完了切り替え）
+- 名前付きステップと所要時間を持つ繰り返しルーティンの作成
+- リクエストごとにモデルを切り替えられるマルチLLMバックエンド
+- 日付指定で過去ログを確認（「先週金曜の日報を見せて」など）
+- プロンプトインジェクション防御・入力文字数/出力トークン上限
+- ゲストセッション対応（TTLによるデータ自動クリーンアップ）
+- Docker Compose によるワンコマンドデプロイ
 
 ## 🏗️ アーキテクチャ
 
@@ -466,7 +510,7 @@ alembic upgrade head
 
 ---
 
-## ✅ テストとCI
+## ✅ テストとCI/CD
 
 ### ローカルでのテスト実行
 CI と同じ Python 3.12+ を使い、依存を入れてください。
@@ -498,13 +542,27 @@ pytest -q \
   tests/test_ci_postgres_smoke.py
 ```
 
-### CI の動作
+### CI/CD の動作
 - `.github/workflows/syntax-check.yml` で Python / TypeScript の構文チェックを実行します。
 - `.github/workflows/tests.yml` で以下を実行します。
   - fast テスト（`test_architecture_imports`, `test_ci_smoke`）
   - PostgreSQL 連携スモークテスト（`test_ci_postgres_smoke`）
   - カバレッジレポート生成（`reports/coverage.xml`）
   - skip 監視（integration ジョブで skip が1件でもあれば失敗）
+  - `main` への push 時のみデプロイ（SSH 経由で `docker compose up -d --build`）
+
+### CD 用 GitHub Secrets
+本番デプロイを有効化する前に、以下をリポジトリ Secrets に設定してください。
+- `SERVER_HOST`（必須）: デプロイ先サーバのホスト名/IP
+- `SERVER_USER`（必須）: デプロイ用SSHユーザー
+- `SERVER_SSH_KEY`（必須）: GitHub Actions が使う秘密鍵
+- `SERVER_PORT`（任意）: SSHポート（既定 `22`）
+- `DEPLOY_PATH`（任意）: サーバ上のgit checkout絶対パス（`DEPLAY_PATH` の typo 互換も許容し、未設定時は `/var/www/scheduler-agent`）
+
+デプロイ先サーバの前提条件:
+- `${DEPLOY_PATH}` がこのリポジトリの有効な git clone であること
+- `${DEPLOY_PATH}` 配下に `secrets.env` が存在すること
+- `SERVER_USER` が Docker / Compose を実行できること
 
 ---
 

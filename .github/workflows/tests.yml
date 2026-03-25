@@ -3,6 +3,14 @@ name: Tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduler-agent-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   fast:
@@ -193,3 +201,161 @@ jobs:
         with:
           name: integration-reports
           path: reports
+
+  deploy:
+    name: Deploy (main push)
+    runs-on: ubuntu-latest
+    needs:
+      - fast
+      - frontend-build
+      - postgres-integration
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    env:
+      DEPLOY_BRANCH: "main"
+      DEPLOY_PATH: ${{ secrets.DEPLAY_PATH || secrets.DEPLOY_PATH || '/var/www/scheduler-agent' }}
+    steps:
+      - name: Check deployment secrets
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in SERVER_HOST SERVER_USER SERVER_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Required GitHub secrets are missing: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Configure SSH key
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${SERVER_SSH_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          port="${SERVER_PORT:-22}"
+          ssh-keyscan -p "${port}" -H "${SERVER_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy via SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLAY_PATH || secrets.DEPLOY_PATH || '/var/www/scheduler-agent' }}
+          DEPLOY_BRANCH: ${{ env.DEPLOY_BRANCH }}
+        run: |
+          set -euo pipefail
+          port="${SERVER_PORT:-22}"
+          ssh -i ~/.ssh/id_rsa -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "${port}" "${SERVER_USER}@${SERVER_HOST}" \
+            "DEPLOY_PATH='${DEPLOY_PATH}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' bash -seu" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          cd "${DEPLOY_PATH}"
+
+          if [ ! -d .git ]; then
+            echo "Deployment path is not a git checkout: ${DEPLOY_PATH}" >&2
+            exit 1
+          fi
+
+          if [ ! -f secrets.env ]; then
+            echo "secrets.env is missing at ${DEPLOY_PATH}. Create it on the server before deploying." >&2
+            exit 1
+          fi
+
+          PREV_COMMIT="$(git rev-parse HEAD)"
+
+          compose_up() {
+            docker compose up -d --build
+          }
+
+          diagnose() {
+            echo "Deployment diagnostics"
+            docker compose ps || true
+            docker compose logs web db --tail=200 || true
+          }
+
+          rollback() {
+            echo "Deploy failed. Rolling back to ${PREV_COMMIT}"
+            git reset --hard "${PREV_COMMIT}"
+            compose_up || true
+          }
+
+          on_error() {
+            trap - ERR
+            diagnose
+            rollback
+          }
+
+          wait_for_service() {
+            service="$1"
+            retries="${2:-45}"
+            while [ "${retries}" -gt 0 ]; do
+              cid="$(docker compose ps -q "${service}")"
+              if [ -z "${cid}" ]; then
+                echo "Service ${service} container is missing." >&2
+                return 1
+              fi
+
+              status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${cid}")"
+              if [ "${status}" = "healthy" ] || [ "${status}" = "running" ]; then
+                echo "Service ${service} is ${status}"
+                return 0
+              fi
+              if [ "${status}" = "unhealthy" ] || [ "${status}" = "exited" ] || [ "${status}" = "dead" ]; then
+                echo "Service ${service} is ${status}" >&2
+                return 1
+              fi
+
+              sleep 2
+              retries=$((retries - 1))
+            done
+
+            echo "Timed out waiting for service ${service} to become ready." >&2
+            return 1
+          }
+
+          probe_web() {
+            docker compose exec -T web python -c "from urllib.request import urlopen; import sys; sys.exit(0 if urlopen('http://127.0.0.1:5010/').status == 200 else 1)"
+          }
+
+          trap on_error ERR
+
+          git fetch origin "${DEPLOY_BRANCH}"
+          git reset --hard "origin/${DEPLOY_BRANCH}"
+
+          compose_up
+
+          docker compose ps
+          for service in db web; do
+            wait_for_service "${service}" 45
+          done
+
+          retries=30
+          while [ "${retries}" -gt 0 ]; do
+            if probe_web; then
+              echo "Web probe passed."
+              break
+            fi
+            sleep 2
+            retries=$((retries - 1))
+          done
+
+          if [ "${retries}" -eq 0 ]; then
+            echo "HTTP probe failed." >&2
+            exit 1
+          fi
+
+          trap - ERR
+          docker image prune -f || true
+          REMOTE_SCRIPT
