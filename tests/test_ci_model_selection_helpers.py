@@ -58,6 +58,62 @@ def test_normalise_base_url_sanitizes_cross_provider_values():
     )
 
 
+def test_normalise_base_url_rejects_unsafe_schemes_and_private_hosts():
+    groq_meta = model_selection.PROVIDER_DEFAULTS["groq"]
+    openai_meta = model_selection.PROVIDER_DEFAULTS["openai"]
+
+    assert (
+        model_selection._normalise_base_url(
+            "groq",
+            "file:///etc/passwd",
+            groq_meta,
+        )
+        == "https://api.groq.com/openai/v1"
+    )
+    assert (
+        model_selection._normalise_base_url(
+            "openai",
+            "http://127.0.0.1:8080/v1",
+            openai_meta,
+        )
+        is None
+    )
+    assert (
+        model_selection._normalise_base_url(
+            "openai",
+            "http://10.0.0.5/v1",
+            openai_meta,
+        )
+        is None
+    )
+    assert (
+        model_selection._normalise_base_url(
+            "openai",
+            "https://[::1]/v1",
+            openai_meta,
+        )
+        is None
+    )
+    assert (
+        model_selection._normalise_base_url(
+            "openai",
+            "https://api.openai.com/v1?proxy=1",
+            openai_meta,
+        )
+        is None
+    )
+
+
+def test_normalise_provider_base_url_rejects_unsafe_prompt_guard_override():
+    assert (
+        model_selection.normalise_provider_base_url(
+            "groq",
+            "file:///etc/passwd",
+        )
+        == "https://api.groq.com/openai/v1"
+    )
+
+
 def test_provider_supports_vision():
     assert model_selection.provider_supports_vision("openai") is True
     assert model_selection.provider_supports_vision("claude") is True

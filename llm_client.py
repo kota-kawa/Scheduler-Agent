@@ -15,7 +15,7 @@ try:
 except ImportError:
     Anthropic = None
 
-from model_selection import PROVIDER_DEFAULTS, apply_model_selection
+from model_selection import PROVIDER_DEFAULTS, apply_model_selection, normalise_provider_base_url
 from scheduler_agent.core.config import get_max_output_tokens
 from scheduler_tools import REVIEW_DECISION_TOOL_NAME, REVIEW_TOOLS, SCHEDULER_TOOLS
 from scheduler_agent.services.usage_limit_service import (
@@ -39,7 +39,13 @@ PROMPT_GUARD_ENABLED = True
 # 日本語: Guard失敗時は fail-open で通常応答を許可 / English: Fail-open on guard errors: allow normal response if guard check fails.
 PROMPT_GUARD_FAIL_OPEN = True
 PROMPT_GUARD_MODEL = os.getenv("PROMPT_GUARD_MODEL", "openai/gpt-oss-safeguard-20b")
-PROMPT_GUARD_BASE_URL = os.getenv("PROMPT_GUARD_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+PROMPT_GUARD_BASE_URL = (
+    normalise_provider_base_url(
+        "groq",
+        os.getenv("PROMPT_GUARD_BASE_URL", "https://api.groq.com/openai/v1"),
+    )
+    or "https://api.groq.com/openai/v1"
+)
 PROMPT_GUARD_API_KEY = os.getenv("PROMPT_GUARD_API_KEY") or os.getenv("GROQ_API_KEY", "")
 PROMPT_GUARD_BLOCKED_MESSAGE = os.getenv(
     "PROMPT_GUARD_BLOCKED_MESSAGE",

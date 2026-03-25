@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 from typing import Dict, List, Tuple
+from urllib.parse import urlparse
 
 # 日本語: Multi-Agent-Platform の設定モーダルと揃えるデフォルト / English: Defaults aligned with the platform modal
 DEFAULT_SELECTION = {"provider": "groq", "model": "openai/gpt-oss-120b", "base_url": ""}
@@ -70,6 +73,83 @@ PROVIDER_DEFAULTS: Dict[str, Dict[str, str | List[str] | None]] = {
 VISION_SUPPORTED_PROVIDERS = {"openai", "claude", "gemini"}
 
 _OVERRIDE_SELECTION: Dict[str, str | None] | None = None
+
+_ALLOWED_BASE_URL_SCHEMES = {"http", "https"}
+_BLOCKED_HOSTNAMES = {
+    "localhost",
+    "host.docker.internal",
+    "metadata",
+    "metadata.google.internal",
+}
+_BLOCKED_DOMAIN_SUFFIXES = (".localhost", ".local", ".localdomain", ".internal", ".lan", ".home")
+_DOMAIN_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _is_public_hostname(hostname: str | None) -> bool:
+    # 日本語: SSRF回避のため内部/不正ホストを除外 / English: Reject internal/invalid hosts to reduce SSRF risk
+    if not isinstance(hostname, str):
+        return False
+
+    lowered = hostname.strip().lower().rstrip(".")
+    if not lowered:
+        return False
+    if lowered in _BLOCKED_HOSTNAMES:
+        return False
+    if any(lowered.endswith(suffix) for suffix in _BLOCKED_DOMAIN_SUFFIXES):
+        return False
+
+    try:
+        ip_value = ipaddress.ip_address(lowered)
+    except ValueError:
+        # Numeric-only hosts that fail IP parsing are treated as invalid.
+        if lowered.replace(".", "").isdigit():
+            return False
+        try:
+            ascii_host = lowered.encode("idna").decode("ascii")
+        except UnicodeError:
+            return False
+        if "." not in ascii_host or ".." in ascii_host:
+            return False
+        labels = ascii_host.split(".")
+        return all(_DOMAIN_LABEL_PATTERN.fullmatch(label) for label in labels)
+
+    return ip_value.is_global
+
+
+def _is_safe_base_url(url: str | None) -> bool:
+    # 日本語: base_url のスキーム・ドメイン妥当性を検証 / English: Validate base_url scheme and domain
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return False
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme.lower() not in _ALLOWED_BASE_URL_SCHEMES:
+        return False
+    if not parsed.netloc or not parsed.hostname:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    if parsed.params or parsed.query or parsed.fragment:
+        return False
+    try:
+        _ = parsed.port
+    except ValueError:
+        return False
+
+    return _is_public_hostname(parsed.hostname)
+
+
+def _safe_base_url_or_default(candidate: str | None, default_base: str | None) -> str | None:
+    # 日本語: unsafe値を既定値へフォールバック / English: Fallback to default when candidate is unsafe
+    cleaned_candidate = (candidate or "").strip().rstrip("/")
+    if cleaned_candidate and _is_safe_base_url(cleaned_candidate):
+        return cleaned_candidate
+
+    cleaned_default = (default_base or "").strip().rstrip("/")
+    if cleaned_default and _is_safe_base_url(cleaned_default):
+        return cleaned_default
+
+    return None
 
 
 def _coerce_selection(raw: Dict[str, str] | None) -> Dict[str, str | None]:
@@ -168,29 +248,34 @@ def _normalise_base_url(provider: str, base_url: str | None, meta: Dict[str, str
         elif "groq" in lower and default_base:
             # Selection leaked from another provider; snap back to Gemini default
             target = default_base
-        return target.rstrip("/")
+        return _safe_base_url_or_default(target, default_base)
 
     if provider == "groq":
         target = cleaned or default_base or ""
         if target and "groq" not in target.lower():
             target = default_base or target
-        return target.rstrip("/") if target else None
+        return _safe_base_url_or_default(target, default_base)
 
     if provider == "openai":
         if not cleaned:
-            return default_base
+            return _safe_base_url_or_default(None, default_base)
         lowered = cleaned.lower()
         # Drop stale base URLs that point to non-OpenAI hosts, even though they may contain
         # an `/openai` path segment (e.g. Gemini's compatibility endpoint).
         if any(key in lowered for key in ("groq", "generativelanguage.googleapis.com")):
-            return default_base
-        if any(key in lowered for key in ("openai", ".azure.com", "localhost", "127.0.0.1")):
-            return cleaned.rstrip("/")
-        return cleaned.rstrip("/")
+            return _safe_base_url_or_default(None, default_base)
+        return _safe_base_url_or_default(cleaned, default_base)
 
     # Claude and other providers keep the explicit override or default as-is
     target = cleaned or default_base or ""
-    return target.rstrip("/") if target else None
+    return _safe_base_url_or_default(target, default_base)
+
+
+def normalise_provider_base_url(provider: str, base_url: str | None) -> str | None:
+    # 日本語: 外部から利用するbase_url正規化関数 / English: Public provider-aware base_url normalization
+    provider_key = provider.strip().lower() if isinstance(provider, str) else "openai"
+    meta = PROVIDER_DEFAULTS.get(provider_key, PROVIDER_DEFAULTS["openai"])
+    return _normalise_base_url(provider_key, base_url, meta)
 
 
 def _resolve_base_url(meta: Dict[str, str | List[str] | None]) -> str | None:
