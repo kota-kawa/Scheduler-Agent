@@ -24,7 +24,7 @@
 
 ## 🎬 Demo Videos
 
-Click a thumbnail to open the video on YouTube.
+Click a thumbnail to open the video on YouTube!
 
 | [![Demo Video 1](https://img.youtube.com/vi/FNXvN0xkqtU/hqdefault.jpg)](https://youtu.be/FNXvN0xkqtU) | [![Demo Video 2](https://img.youtube.com/vi/pMmqIU1zab8/hqdefault.jpg)](https://youtu.be/pMmqIU1zab8) | [![Demo Video 3](https://img.youtube.com/vi/SbBVq13BDxY/hqdefault.jpg)](https://youtu.be/SbBVq13BDxY) |
 | --- | --- | --- |
