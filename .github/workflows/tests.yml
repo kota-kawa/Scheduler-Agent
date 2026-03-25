@@ -331,6 +331,7 @@ jobs:
 
           trap on_error ERR
 
+          git config --global --add safe.directory "${DEPLOY_PATH}"
           git fetch origin "${DEPLOY_BRANCH}"
           git reset --hard "origin/${DEPLOY_BRANCH}"
 
