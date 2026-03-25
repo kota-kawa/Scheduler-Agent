@@ -155,54 +155,7 @@ DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@db:5432/scheduler
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...
-# Prompt guard (recommended)
 GROQ_API_KEY=gsk_...
-# Monthly outbound LLM request cap (optional, default: 1000)
-SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT=1000
-# Max input length per user message (optional, default: 10000 chars)
-SCHEDULER_MAX_INPUT_CHARS=10000
-# Max output tokens per LLM call (optional, default: 5000)
-SCHEDULER_MAX_OUTPUT_TOKENS=5000
-
-# ---- Public demo hardening (recommended) ----
-APP_ENV=production
-SCHEDULER_TRUSTED_HOSTS=localhost,127.0.0.1,your-demo-domain.example
-SCHEDULER_PROXY_TRUSTED_HOSTS=127.0.0.1,::1,localhost
-SCHEDULER_FORCE_HTTPS=true
-SCHEDULER_SESSION_HTTPS_ONLY=true
-SCHEDULER_SESSION_SAME_SITE=lax
-SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false
-SCHEDULER_ENABLE_MCP=false
-# If MCP must be enabled, require bearer token:
-# SCHEDULER_ENABLE_MCP=true
-# SCHEDULER_MCP_AUTH_TOKEN=replace-with-long-random-token
-SCHEDULER_RATE_LIMIT_WINDOW_SECONDS=60
-SCHEDULER_RATE_LIMIT_MAX_REQUESTS=120
-SCHEDULER_REQUEST_TIMEOUT_SECONDS=30
-SCHEDULER_MAX_REQUEST_BODY_BYTES=262144
-SCHEDULER_GUEST_DATA_TTL_HOURS=72
-SCHEDULER_GUEST_CLEANUP_INTERVAL_SECONDS=300
-```
-
-```env
-# secrets.env の例（公開デモ向けの推奨設定）
-APP_ENV=production
-SCHEDULER_TRUSTED_HOSTS=localhost,127.0.0.1,your-demo-domain.example
-SCHEDULER_PROXY_TRUSTED_HOSTS=127.0.0.1,::1,localhost
-SCHEDULER_FORCE_HTTPS=true
-SCHEDULER_SESSION_HTTPS_ONLY=true
-SCHEDULER_SESSION_SAME_SITE=lax
-SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false
-SCHEDULER_ENABLE_MCP=false
-# MCP を有効化する場合のみ固定トークンを設定
-# SCHEDULER_ENABLE_MCP=true
-# SCHEDULER_MCP_AUTH_TOKEN=replace-with-long-random-token
-SCHEDULER_RATE_LIMIT_WINDOW_SECONDS=60
-SCHEDULER_RATE_LIMIT_MAX_REQUESTS=120
-SCHEDULER_REQUEST_TIMEOUT_SECONDS=30
-SCHEDULER_MAX_REQUEST_BODY_BYTES=262144
-SCHEDULER_GUEST_DATA_TTL_HOURS=72
-SCHEDULER_GUEST_CLEANUP_INTERVAL_SECONDS=300
 ```
 
 ### 2) Start the app
@@ -253,26 +206,8 @@ python -m pip install -e .
 python -m pip install pytest pytest-cov
 ```
 
-Fast regression set:
-
 ```bash
 pytest -q tests/test_architecture_imports.py tests/test_ci_smoke.py
-```
-
-PostgreSQL smoke + coverage:
-
-```bash
-export TEST_DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
-export DATABASE_URL=$TEST_DATABASE_URL
-export SESSION_SECRET=test-secret
-pytest -q \
-  --cov=scheduler_agent \
-  --cov=app \
-  --cov-report=term-missing \
-  --cov-report=xml \
-  tests/test_architecture_imports.py \
-  tests/test_ci_smoke.py \
-  tests/test_ci_postgres_smoke.py
 ```
 
 ### CI/CD behavior
@@ -488,26 +423,8 @@ python -m pip install -e .
 python -m pip install pytest pytest-cov
 ```
 
-軽量な回帰テスト:
-
 ```bash
 pytest -q tests/test_architecture_imports.py tests/test_ci_smoke.py
-```
-
-PostgreSQL スモークテストとカバレッジ:
-
-```bash
-export TEST_DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/scheduler_test
-export DATABASE_URL=$TEST_DATABASE_URL
-export SESSION_SECRET=test-secret
-pytest -q \
-  --cov=scheduler_agent \
-  --cov=app \
-  --cov-report=term-missing \
-  --cov-report=xml \
-  tests/test_architecture_imports.py \
-  tests/test_ci_smoke.py \
-  tests/test_ci_postgres_smoke.py
 ```
 
 ### CI/CD の動作
