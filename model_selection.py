@@ -75,13 +75,32 @@ _OVERRIDE_SELECTION: Dict[str, str | None] | None = None
 def _coerce_selection(raw: Dict[str, str] | None) -> Dict[str, str | None]:
     # 日本語: selection を安全に正規化 / English: Normalize selection fields safely
     """Normalise provider/model/base_url fields and fall back to defaults."""
-
-    # 日本語: 強制的に gpt-oss-120b を使用するように固定 / English: Force gpt-oss-120b
-    provider = "groq"
-    model = "openai/gpt-oss-120b"
+    provider = str(DEFAULT_SELECTION["provider"]).strip().lower()
+    model = str(DEFAULT_SELECTION["model"]).strip()
     base_url: str | None = None
 
-    # 日本語: 他の選択を無視して常に 120b を返す / English: Return 120b regardless of raw input
+    if isinstance(raw, dict):
+        raw_provider = raw.get("provider")
+        if isinstance(raw_provider, str) and raw_provider.strip():
+            candidate = raw_provider.strip().lower()
+            if candidate in PROVIDER_DEFAULTS:
+                provider = candidate
+
+        raw_model = raw.get("model")
+        if isinstance(raw_model, str) and raw_model.strip():
+            model = raw_model.strip()
+        else:
+            # If provider changes but model is omitted/invalid, use provider's first known model.
+            for item in AVAILABLE_MODELS:
+                if item.get("provider") == provider and item.get("model"):
+                    model = str(item["model"])
+                    break
+
+        raw_base_url = raw.get("base_url")
+        if isinstance(raw_base_url, str):
+            cleaned_base = raw_base_url.strip()
+            base_url = cleaned_base or None
+
     return {"provider": provider, "model": model, "base_url": base_url}
 
 

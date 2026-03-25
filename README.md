@@ -187,34 +187,6 @@ docker compose down
 
 ---
 
-## 🔐 Public demo security checklist
-
-For “anyone can access immediately” deployments, keep these enabled:
-
-- Dangerous evaluation APIs disabled: `SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false`
-- MCP endpoint disabled (or token-protected): `SCHEDULER_ENABLE_MCP=false` or set `SCHEDULER_MCP_AUTH_TOKEN`
-- Trusted hosts configured: `SCHEDULER_TRUSTED_HOSTS=...`
-- HTTPS redirect + secure session cookie enabled
-- Request guard active (`rate limit`, `timeout`, `max body size`)
-- Anonymous data isolation via `guest_id` and short retention TTL
-- DB container port not exposed externally
-
----
-
-## 🔐 公開デモ向けセキュリティチェックリスト
-
-「誰でもすぐ試せる公開」を前提にする場合、以下を必ず有効化してください。
-
-- 破壊系評価APIを無効化: `SCHEDULER_ENABLE_DANGEROUS_EVAL_APIS=false`
-- MCPは無効化（または固定トークン必須）: `SCHEDULER_ENABLE_MCP=false` / `SCHEDULER_MCP_AUTH_TOKEN=...`
-- 許可Hostを制限: `SCHEDULER_TRUSTED_HOSTS=...`
-- HTTPSリダイレクトとSecure/SameSite付きセッションCookieを有効化
-- リクエストガード（レート制限・タイムアウト・本文サイズ上限）を有効化
-- `guest_id` による匿名データ分離と短期TTL削除を有効化
-- DBコンテナのポートを外部公開しない（`docker-compose.yml` は非公開設定）
-
----
-
 ## 🗂️ Schema migrations (Alembic)
 
 Schema changes are managed with Alembic.
