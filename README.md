@@ -241,13 +241,6 @@ export DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/sch
 alembic upgrade head
 ```
 
-When you change SQLModel definitions, generate and apply a revision:
-
-```bash
-alembic revision --autogenerate -m "describe your schema change"
-alembic upgrade head
-```
-
 ---
 
 ## ✅ Testing, CI/CD
@@ -283,26 +276,8 @@ pytest -q \
 ```
 
 ### CI/CD behavior
-- `.github/workflows/syntax-check.yml` runs Python and TypeScript syntax checks.
-- `.github/workflows/tests.yml` runs:
-  - fast tests (`test_architecture_imports`, `test_ci_smoke`)
-  - PostgreSQL-backed smoke tests (`test_ci_postgres_smoke`)
-  - coverage report generation (`reports/coverage.xml`)
-  - skipped-test detection (CI fails if any test is skipped in integration job)
-  - deploy on `main` push only (via SSH + `docker compose up -d --build`)
 
-### CD secrets (GitHub Actions)
-Set these repository secrets before enabling production deploy:
-- `SERVER_HOST` (required): target server hostname/IP
-- `SERVER_USER` (required): SSH user for deployment
-- `SERVER_SSH_KEY` (required): private key used by GitHub Actions
-- `SERVER_PORT` (optional): SSH port (default: `22`)
-- `DEPLOY_PATH` (optional): absolute path of the git checkout on server (fallbacks: `DEPLAY_PATH` typo-compatible, then `/var/www/scheduler-agent`)
-
-Server-side prerequisites for deploy job:
-- `${DEPLOY_PATH}` is already a valid git clone of this repository
-- `secrets.env` exists under `${DEPLOY_PATH}`
-- Docker/Compose are installed and usable by `SERVER_USER`
+GitHub Actions runs syntax checks, fast tests, PostgreSQL smoke tests, and coverage reporting in sequence — then auto-deploys to the server on `main` push via SSH.
 
 ---
 
@@ -501,13 +476,6 @@ export DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@localhost:5432/sch
 alembic upgrade head
 ```
 
-SQLModel の定義を変更した場合は、リビジョンを作成して適用してください。
-
-```bash
-alembic revision --autogenerate -m "スキーマ変更の内容"
-alembic upgrade head
-```
-
 ---
 
 ## ✅ テストとCI/CD
@@ -543,26 +511,8 @@ pytest -q \
 ```
 
 ### CI/CD の動作
-- `.github/workflows/syntax-check.yml` で Python / TypeScript の構文チェックを実行します。
-- `.github/workflows/tests.yml` で以下を実行します。
-  - fast テスト（`test_architecture_imports`, `test_ci_smoke`）
-  - PostgreSQL 連携スモークテスト（`test_ci_postgres_smoke`）
-  - カバレッジレポート生成（`reports/coverage.xml`）
-  - skip 監視（integration ジョブで skip が1件でもあれば失敗）
-  - `main` への push 時のみデプロイ（SSH 経由で `docker compose up -d --build`）
 
-### CD 用 GitHub Secrets
-本番デプロイを有効化する前に、以下をリポジトリ Secrets に設定してください。
-- `SERVER_HOST`（必須）: デプロイ先サーバのホスト名/IP
-- `SERVER_USER`（必須）: デプロイ用SSHユーザー
-- `SERVER_SSH_KEY`（必須）: GitHub Actions が使う秘密鍵
-- `SERVER_PORT`（任意）: SSHポート（既定 `22`）
-- `DEPLOY_PATH`（任意）: サーバ上のgit checkout絶対パス（`DEPLAY_PATH` の typo 互換も許容し、未設定時は `/var/www/scheduler-agent`）
-
-デプロイ先サーバの前提条件:
-- `${DEPLOY_PATH}` がこのリポジトリの有効な git clone であること
-- `${DEPLOY_PATH}` 配下に `secrets.env` が存在すること
-- `SERVER_USER` が Docker / Compose を実行できること
+GitHub Actions で構文チェック・fast テスト・PostgreSQL スモークテスト・カバレッジ計測を順に実行し、`main` への push 時のみ SSH 経由でサーバへ自動デプロイします。
 
 ---
 
