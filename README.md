@@ -66,6 +66,35 @@ flowchart LR
 
 ---
 
+## 🧪 Evaluation
+
+### Scheduler Agent
+
+**Role**
+The Scheduler Agent manages tasks, routines, memos, and date-dependent operations through natural-language interaction and tool calling.
+
+**Evaluation Protocol**
+I evaluated 10 task-management scenarios, including:
+- task creation
+- update / deletion
+- routine editing
+- compound instructions
+- relative-date interpretation
+
+Each task was tested three times and scored as:
+- **○**: 3/3 success
+- **△**: 1–2/3 success
+- **×**: 0/3 success
+
+**Result**
+Among the tested models, **Qwen3 32B solved all tasks correctly**, showing particularly strong suitability for structured scheduler operations.
+In contrast, even stronger frontier models were not always robust: for example, **GPT-5.1 failed on relative-date calculation**, and **Claude Haiku 4.5 often failed to trigger tool calls at all**.
+
+**Why this matters**
+This result highlights an important systems insight: **for structured tool-use tasks, model suitability is not determined by general model prestige alone**.
+
+---
+
 ## 🚀 Quick start (Docker Compose only)
 
 ### 1) Prepare your API keys
@@ -302,6 +331,35 @@ flowchart LR
 - **マルチ LLM ルーティング層を置く理由:** `model_selection.py` / `llm_client.py` でプロバイダ依存を分離し、ベンダーロックイン回避・コスト/レイテンシ最適化・フォールバック戦略を取りやすくするためです。
 - **計算ツールを用意した理由:** 曜日・日付計算は LLM 単体推論だと誤りが出やすいため、決定的なツール実行に切り出して計算ミスとハルシネーションのリスクを下げ、運用の安定性を高めるためです。これはプロンプト調整だけに頼らない実践的な信頼性設計です。
 - **React SPA + Vite と Jinja 互換構成を併用する理由:** コンポーネント単位で UI を高速に改善しつつ、必要な箇所ではシンプルなサーバーサイド入口を維持できるためです。
+
+---
+
+## 🧪 評価
+
+### Scheduler Agent
+
+**役割**
+Scheduler Agent は、自然言語の対話とツール呼び出しを通じて、タスク・ルーティン・メモ・日付依存の操作を管理します。
+
+**評価プロトコル**
+以下を含む10件のタスク管理シナリオを評価しました。
+- タスクの作成
+- 更新・削除
+- ルーティンの編集
+- 複合指示
+- 相対日付の解釈
+
+各タスクは3回テストし、以下の基準でスコアリングしました。
+- **○**: 3/3 成功
+- **△**: 1〜2/3 成功
+- **×**: 0/3 成功
+
+**結果**
+テストしたモデルの中で、**Qwen3 32B はすべてのタスクを正解**し、構造化されたスケジューラー操作への適性が特に高いことが示されました。
+一方、より高性能とされるフロンティアモデルでも安定性に課題がありました。例えば、**GPT-5.1 は相対日付の計算に失敗**し、**Claude Haiku 4.5 はツール呼び出し自体を行わないケースが多く**見られました。
+
+**この結果が示すこと**
+この結果は、システム設計上の重要な知見を示しています。**構造化されたツール利用タスクにおいて、モデルの適性は一般的な知名度だけでは決まらない**ということです。
 
 ---
 
