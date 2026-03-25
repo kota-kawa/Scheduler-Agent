@@ -39,6 +39,7 @@ class EvaluationResult(SQLModel, table=True):
 # 日本語: 月次のLLM API利用回数カウンタ / English: Monthly LLM API usage counter
 class LlmMonthlyUsage(SQLModel, table=True):
     __tablename__ = "llm_monthly_usage"
+    # 日本語: 同月同scopeの重複行を禁止 / English: Prevent duplicate rows for the same year/month/scope
     __table_args__ = (
         UniqueConstraint("year", "month", "scope", name="uq_llm_monthly_usage_year_month_scope"),
     )

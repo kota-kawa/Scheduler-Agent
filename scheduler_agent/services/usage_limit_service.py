@@ -42,11 +42,13 @@ class MonthlyLlmRequestLimitExceeded(RuntimeError):
 
 
 def _current_year_month(now: datetime.datetime | None = None) -> tuple[int, int]:
+    # 日本語: テスト時は now を優先し、未指定なら現在時刻を利用 / English: Prefer injected `now` for tests, otherwise use current time
     timestamp = now or datetime.datetime.now()
     return timestamp.year, timestamp.month
 
 
 def _build_monthly_usage_select_statement(*, year: int, month: int, scope: str):
+    # 日本語: 同一月・同一scopeの行をロック付きで取得するクエリを生成 / English: Build row-select query (with row lock when available) for month/scope
     statement = select(LlmMonthlyUsage).where(
         LlmMonthlyUsage.year == year,
         LlmMonthlyUsage.month == month,
@@ -72,6 +74,7 @@ def reserve_monthly_llm_request(
     normalized_scope = (scope or DEFAULT_SCOPE).strip() or DEFAULT_SCOPE
     monthly_limit = get_monthly_llm_request_limit()
 
+    # 日本語: 競合挿入に備えて最大2回リトライ / English: Retry at most twice to handle concurrent insert race
     for attempt in range(2):
         with session_factory() as db:
             try:
@@ -85,6 +88,7 @@ def reserve_monthly_llm_request(
 
                 used_before = int(row.request_count) if row else 0
                 if used_before >= monthly_limit:
+                    # 日本語: 上限超過時はカウントを増やさず却下 / English: Reject without incrementing when quota is already exhausted
                     return MonthlyUsageReservation(
                         allowed=False,
                         year=year,
@@ -97,6 +101,7 @@ def reserve_monthly_llm_request(
                     )
 
                 if row is None:
+                    # 日本語: 当月レコードが無ければ新規作成 / English: Create monthly row when it does not exist yet
                     row = LlmMonthlyUsage(
                         year=year,
                         month=month,
@@ -107,6 +112,7 @@ def reserve_monthly_llm_request(
                     db.add(row)
                     used_after = 1
                 else:
+                    # 日本語: 既存レコードの利用回数をインクリメント / English: Increment usage counter on existing monthly row
                     row.request_count = used_before + 1
                     row.updated_at = now or datetime.datetime.now()
                     db.add(row)
@@ -149,6 +155,7 @@ def reserve_monthly_llm_request_or_raise(
     session_factory=create_session,
 ) -> MonthlyUsageReservation:
     """Reserve one monthly request and raise when the limit is exhausted."""
+    # 日本語: 呼び出し側は例外ベースで上限制御できる / English: Provide exception-based flow control for callers
     reservation = reserve_monthly_llm_request(scope=scope, now=now, session_factory=session_factory)
     if not reservation.allowed:
         raise MonthlyLlmRequestLimitExceeded(reservation)

@@ -46,6 +46,7 @@ def _is_localhost(value: str) -> bool:
 
 
 def _effective_client_ip(request: Request) -> str:
+    # 日本語: localhost経由時のみ x-forwarded-for を信頼 / English: Trust x-forwarded-for only when direct client is localhost
     direct_client = request.client.host if request.client and request.client.host else ""
     direct_client = str(direct_client).strip()
 
@@ -58,6 +59,7 @@ def _effective_client_ip(request: Request) -> str:
 
 
 def _normalize_guest_id(value: str) -> str:
+    # 日本語: guest_id の形式を検証し不正値を除外 / English: Validate guest_id format and reject invalid tokens
     token = str(value or "").strip()
     if not token:
         return ""
@@ -67,6 +69,7 @@ def _normalize_guest_id(value: str) -> str:
 
 
 def _is_protected_path(path: str, prefixes: Iterable[str] | None = None) -> bool:
+    # 日本語: 公開パスを除き、保護対象prefix配下のみガードを適用 / English: Apply guards only to configured protected prefixes excluding public paths
     path_value = str(path or "")
     if path_value in _PUBLIC_ENDPOINTS:
         return False
@@ -85,6 +88,7 @@ def enforce_request_rate_limit(request: Request) -> None:
     key = f"{client_ip}:{request.url.path}"
 
     with _REQUEST_COUNTER_LOCK:
+        # 日本語: スライディングウィンドウで古い記録を除去 / English: Evict stale timestamps for rolling-window rate limiting
         bucket = _REQUEST_COUNTERS.setdefault(key, deque())
         threshold = now - window_seconds
         while bucket and bucket[0] < threshold:
@@ -98,6 +102,7 @@ def enforce_request_rate_limit(request: Request) -> None:
 
 
 async def enforce_request_body_limit(request: Request) -> None:
+    # 日本語: Content-Length ヘッダで事前に本文サイズを検証 / English: Pre-check request body size using Content-Length header
     if not _is_protected_path(str(request.url.path)):
         return
     content_length = request.headers.get("content-length")
@@ -112,6 +117,7 @@ async def enforce_request_body_limit(request: Request) -> None:
 
 
 def resolve_guest_context(request: Request) -> GuestContext:
+    # 日本語: 既存IDがなければ匿名ゲストIDを新規発行 / English: Reuse provided guest ID or mint a new anonymous ID
     header_guest_id = _normalize_guest_id(request.headers.get(GUEST_ID_HEADER) or "")
     cookie_guest_id = _normalize_guest_id(request.cookies.get(guest_cookie_name()) or "")
     raw_guest_id = header_guest_id or cookie_guest_id

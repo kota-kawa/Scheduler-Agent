@@ -12,6 +12,7 @@ _GUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
 def _normalize_guest_id(value: str) -> str:
+    # 日本語: 受け取ったIDを検証し、不正値は空文字へ正規化 / English: Validate incoming guest ID and normalize invalid values to empty string
     token = str(value or "").strip()
     if not token:
         return ""
@@ -21,6 +22,7 @@ def _normalize_guest_id(value: str) -> str:
 
 
 def get_guest_id_from_request(request: Request) -> str:
+    # 日本語: 優先順位は state -> header -> cookie -> default / English: Resolution order is state -> header -> cookie -> default
     state = getattr(request, "state", None)
     context = getattr(state, "guest_context", None) if state is not None else None
     guest_id = _normalize_guest_id(getattr(context, "guest_id", None))

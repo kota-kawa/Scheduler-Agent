@@ -16,12 +16,15 @@ _last_cleanup_monotonic = 0.0
 
 
 def _cleanup_cutoff() -> datetime.datetime:
+    # 日本語: TTL時間より古いデータを削除対象とする境界時刻 / English: Cutoff timestamp for records older than configured TTL
     return datetime.datetime.now() - datetime.timedelta(hours=guest_data_ttl_hours())
 
 
 def _cleanup_expired_guest_data(db: Session) -> None:
+    # 日本語: 匿名ゲスト(default以外)の期限切れデータのみ削除 / English: Delete expired records only for anonymous guests (non-default)
     cutoff = _cleanup_cutoff()
 
+    # 日本語: Step削除前に関連DailyLogを先に削除して参照整合性を維持 / English: Delete dependent DailyLog rows before Step deletion
     stale_step_ids = db.exec(
         select(Step.id).where(Step.guest_id != "default", Step.created_at < cutoff)
     ).all()
@@ -43,6 +46,7 @@ def cleanup_expired_guest_data_if_due(db: Session) -> None:
 
     interval = guest_data_cleanup_interval_seconds()
     now = time.monotonic()
+    # 日本語: 実行間隔内ならスキップしてDB負荷を抑制 / English: Skip cleanup within interval to reduce DB load
     if now - _last_cleanup_monotonic < interval:
         return
 
