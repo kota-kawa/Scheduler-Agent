@@ -55,6 +55,10 @@ Click a thumbnail to open the video on YouTube.
 
 ## 🏗️ Architecture
 
+<p align="center">
+  <img src="assets/images/scheduler-agent-architecture.png" alt="Scheduler Agent Architecture" width="900">
+</p>
+
 ```mermaid
 flowchart LR
   user[User Browser] --> ui[React SPA / Jinja UI]
@@ -265,6 +269,10 @@ This project is released under the [MIT License](LICENSE.md).
 - Docker Compose によるワンコマンドデプロイ
 
 ## 🏗️ アーキテクチャ
+
+<p align="center">
+  <img src="assets/images/scheduler-agent-architecture.png" alt="Scheduler Agent アーキテクチャ" width="900">
+</p>
 
 ```mermaid
 flowchart LR
