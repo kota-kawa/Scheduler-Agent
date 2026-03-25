@@ -268,6 +268,8 @@ jobs:
             exit 1
           fi
 
+          git config --global --add safe.directory "${DEPLOY_PATH}"
+
           if [ ! -f secrets.env ]; then
             echo "secrets.env is missing at ${DEPLOY_PATH}. Create it on the server before deploying." >&2
             exit 1
@@ -331,7 +333,6 @@ jobs:
 
           trap on_error ERR
 
-          git config --global --add safe.directory "${DEPLOY_PATH}"
           git fetch origin "${DEPLOY_BRANCH}"
           git reset --hard "origin/${DEPLOY_BRANCH}"
 
