@@ -375,14 +375,7 @@ DATABASE_URL=postgresql+psycopg2://scheduler:scheduler@db:5432/scheduler
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...
-# プロンプトガード（推奨）
 GROQ_API_KEY=gsk_...
-# 月次LLM APIリクエスト上限（任意、未設定時は1000）
-SCHEDULER_MONTHLY_LLM_REQUEST_LIMIT=1000
-# 1メッセージあたり入力文字数上限（任意、未設定時は10000）
-SCHEDULER_MAX_INPUT_CHARS=10000
-# 1回のLLM呼び出しあたり出力トークン上限（任意、未設定時は5000）
-SCHEDULER_MAX_OUTPUT_TOKENS=5000
 ```
 
 ### 2) 起動
